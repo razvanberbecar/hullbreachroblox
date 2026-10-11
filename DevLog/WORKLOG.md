@@ -8,6 +8,27 @@ Be factual — give script/instance paths, and for tuning changes give old → n
 
 ---
 
+## 2026-10-11 — Claude (Razvan session) [GitHub repo + script export + CLAUDE.md rewrite]
+
+**No changes to the Studio place this session** (read-only: script sources, `Workspace.Submarine`
+attrs, `Workspace.StreamingEnabled`, `Players.MaxPlayers`).
+
+- **GitHub:** the project folder is now a git repo pushed to
+  https://github.com/razvanberbecar/hullbreachroblox (branch `main`, **public**). New root `.gitignore`
+  keeps out `DiscordServer/bot_token.txt`, `.claude/settings.local.json` (contains a live Discord
+  webhook URL), `weppy-project-sync/` (71 MB of Weppy logs) and `__pycache__`.
+- **`src/`:** read-only snapshot of all **37 scripts** from the Hull Breach place, by service
+  (`.server.luau` = Script, `.client.luau` = LocalScript, `.luau` = ModuleScript). Line counts verified
+  against Studio; secret-scanned before push (none found — the commentary webhook is a Roblox Secret).
+  It is a snapshot, not a sync: Studio stays the source of truth; ask Claude to re-export after changes.
+- **`CLAUDE.md` rewritten** to match the live game (it still said "pre-Phase 1"): name Hull Breach,
+  real tuning values, 9 endings, co-op, run randomization, `Net` remotes, baked map + `Dress()`, gotchas.
+- Weppy reported **Basic** tier today (`execute_luau` blocked) — previously Pro.
+
+Verified live: `Workspace.Submarine` `Baked=true`, `StreamingEnabled=false`, `MaxPlayers=60`.
+
+---
+
 ## 2026-07-06 — Claude (Razvan session) [Floor z-fighting fix (water vs floor)]
 
 **Razvan reported the floor "glitchy — like 2 textures fighting when the camera moves."** Diagnosed as
