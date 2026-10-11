@@ -1,0 +1,11 @@
+# Secrets — never commit
+DiscordServer/bot_token.txt
+.env
+.claude/settings.local.json
+
+# Weppy MCP local logs / sync cache (machine-generated, very large)
+weppy-project-sync/
+
+# Python
+__pycache__/
+*.pyc
