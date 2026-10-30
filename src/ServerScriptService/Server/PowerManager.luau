@@ -21,6 +21,7 @@ local TweenService = game:GetService("TweenService")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 local SoundData = require(Shared:WaitForChild("SoundData"))
+local SectionData = require(Shared:WaitForChild("SectionData"))
 local Net = require(Shared:WaitForChild("Net"))
 
 local serverFolder = ServerScriptService:WaitForChild("Server")
@@ -58,66 +59,178 @@ local function setEmergencyLights(on: boolean)
 	end
 end
 
-local function flickerLight(light: SpotLight)
-	-- a SETTLED fluorescent: mostly steady, with the occasional brief subtle dip —
-	-- deliberately calmer than the red emergency strobe.
-	local base = light:GetAttribute("BaseBrightness") or light.Brightness
+-- Main power = warm tungsten work lamps. MapBuilder dresses every MainLight fixture
+-- as a caged pendant with a DD_Bulb; one lamp per room carries the MainShadows attr
+-- and a DD_MainFillAtt ceiling-bounce light. When the generator catches, the lamps
+-- strike room by room outward from the engine room, and each room's red emergency
+-- lantern drops to a faint glow and hands its shadows to the work lamp (so the
+-- shadow-casting budget stays ~9 whichever circuit is live).
+local TUNGSTEN = Color3.fromRGB(255, 196, 140)      -- ~3000K work lamp
+local FILAMENT_COLD = Color3.fromRGB(255, 110, 40)  -- filament still warming up / sagging
+local BULB_ON = Color3.fromRGB(255, 205, 150)
+local BULB_OFF = Color3.fromRGB(58, 50, 42)
+local MAIN_BRIGHTNESS = 4.5
+local MAIN_FILL = 1.2
+local EMERGENCY_UNDER_MAIN = 0.3   -- red lanterns stay faintly on once the generator runs
+local STRIKE_HOP_DELAY = 0.45      -- seconds per section away from the engine room
+local LENS_DARK = Color3.fromRGB(60, 10, 6)
+local mainGeneration = 0           -- bumped on every on/off so stale strike/sag threads stop
+
+-- A lantern's lens + light cone at a fraction of full output.
+local function paintLantern(fixture: Instance, frac: number)
+	local lensOn = fixture:GetAttribute("LensColor")
+	if typeof(lensOn) == "Color3" and fixture:IsA("BasePart") then
+		(fixture :: BasePart).Color = LENS_DARK:Lerp(lensOn, math.clamp(frac, 0, 1))
+	end
+	local cone = fixture:FindFirstChild("DD_LightCone")
+	if cone and cone:IsA("Beam") then (cone :: Beam).Brightness = math.clamp(frac, 0, 1.3) end
+end
+
+-- Scale an emergency lantern (light, bounce fill, lens) to `scale` of its full output.
+-- Full output and whether it casts shadows are recorded the first time.
+local function emergencyLevel(fixture: Instance, scale: number, shadows: boolean)
+	local light = fixture:FindFirstChildOfClass("PointLight")
+	if not light then return end
+	local full = light:GetAttribute("FullBrightness")
+	if full == nil then
+		full = light:GetAttribute("BaseBrightness") or light.Brightness
+		light:SetAttribute("FullBrightness", full)
+		light:SetAttribute("CastsShadows", light.Shadows)
+	end
+	light:SetAttribute("BaseBrightness", full * scale)
+	light.Brightness = full * scale
+	light.Shadows = shadows and light:GetAttribute("CastsShadows") == true
+	local att = fixture:FindFirstChild("DD_BounceAtt")
+	local bounce = att and att:FindFirstChildOfClass("PointLight")
+	if bounce then
+		local bfull = bounce:GetAttribute("FullBrightness")
+		if bfull == nil then
+			bfull = bounce:GetAttribute("BaseBrightness") or bounce.Brightness
+			bounce:SetAttribute("FullBrightness", bfull)
+		end
+		bounce:SetAttribute("BaseBrightness", bfull * scale)
+		bounce.Brightness = bfull * scale
+		bounce.Enabled = scale > 0.5   -- a faint lantern needs no bounce fill
+	end
+	paintLantern(fixture, scale)
+end
+
+-- One work lamp at level k (0 = off .. 1 = full), optionally tinted.
+local function setLamp(fixture: Instance, k: number, color: Color3?)
+	local c = color or TUNGSTEN
+	local light = fixture:FindFirstChildOfClass("SpotLight")
+	if light then
+		light.Enabled = k > 0
+		light.Brightness = MAIN_BRIGHTNESS * k
+		light.Color = c
+	end
+	local fillAtt = fixture:FindFirstChild("DD_MainFillAtt")
+	local fill = fillAtt and fillAtt:FindFirstChildOfClass("PointLight")
+	if fill then
+		fill.Enabled = k > 0
+		fill.Brightness = MAIN_FILL * k
+		fill.Color = c
+	end
+	local bulb = fixture:FindFirstChild("DD_Bulb")
+	if bulb and bulb:IsA("BasePart") then
+		if k <= 0.02 then
+			bulb.Material = Enum.Material.Glass
+			bulb.Color = BULB_OFF
+		else
+			bulb.Material = Enum.Material.Neon
+			bulb.Color = BULB_OFF:Lerp(color and BULB_ON:Lerp(color, 0.5) or BULB_ON, math.clamp(k, 0, 1))
+		end
+	end
+end
+
+-- Running lamps in a room sag together now and then (generator load), warming in
+-- colour as they dim: a tungsten brown-out, calmer than the red emergency stutter.
+local function startMainSag(lamps: { Instance }, gen: number)
 	task.spawn(function()
-		while light.Parent and light.Enabled do
-			task.wait(4 + math.random() * 7)         -- long steady stretches
-			if not light.Enabled then break end
-			for _ = 1, math.random(1, 2) do
-				light.Brightness = base * (0.5 + math.random() * 0.25)
-				task.wait(0.05 + math.random() * 0.06)
-				light.Brightness = base
-				task.wait(0.06)
-			end
+		while mainGeneration == gen do
+			task.wait(5 + math.random() * 9)
+			if mainGeneration ~= gen then break end
+			local depth = 0.45 + math.random() * 0.3
+			for _, f in ipairs(lamps) do setLamp(f, depth, FILAMENT_COLD:Lerp(TUNGSTEN, depth)) end
+			task.wait(0.12 + math.random() * 0.35)
+			if mainGeneration ~= gen then break end
+			for _, f in ipairs(lamps) do setLamp(f, 1) end
 		end
 	end)
 end
 
-local function setMainLights(on: boolean)
-	for _, fixture in ipairs(CollectionService:GetTagged("MainLight")) do
-		local light = fixture:FindFirstChildOfClass("SpotLight")
-		if light then
-			light.Enabled = on
-			if on then
-				-- dim, clean, mostly-steady work light (the "generator is on" glow) —
-				-- a calm cool white, not the harsh red emergency flicker.
-				light.Color = Color3.fromRGB(208, 222, 235)
-				light.Brightness = 1.5
-				light:SetAttribute("BaseBrightness", 1.5)
-				flickerLight(light)
-			else
-				light.Brightness = 0
-			end
-		end
+-- One room's lamps catching: a few failed strikes and a spark, the red lantern hands
+-- over, then the filaments warm from deep orange to tungsten.
+local function strikeRoom(lamps: { Instance }, lanterns: { Instance }, gen: number)
+	for _ = 1, math.random(2, 3) do
+		if mainGeneration ~= gen then return end
+		for _, f in ipairs(lamps) do setLamp(f, 0.6 + math.random() * 0.4) end
+		task.wait(0.04 + math.random() * 0.05)
+		for _, f in ipairs(lamps) do setLamp(f, 0) end
+		task.wait(0.07 + math.random() * 0.14)
 	end
+	if mainGeneration ~= gen then return end
+	local first = lamps[1]
+	if first and first:IsA("BasePart") then
+		Net.Event("SoundCue"):FireAllClients("electrical_spark", (first :: BasePart).Position, 0.35)
+	end
+	for _, lf in ipairs(lanterns) do emergencyLevel(lf, EMERGENCY_UNDER_MAIN, false) end
+	for _, f in ipairs(lamps) do
+		local light = f:FindFirstChildOfClass("SpotLight")
+		if light then light.Shadows = f:GetAttribute("MainShadows") == true end
+	end
+	local steps = 8
+	for s = 1, steps do
+		if mainGeneration ~= gen then return end
+		local t = s / steps
+		for _, f in ipairs(lamps) do setLamp(f, 0.25 + 0.75 * t, FILAMENT_COLD:Lerp(TUNGSTEN, t)) end
+		task.wait(0.09)
+	end
+	startMainSag(lamps, gen)
 end
 
--- A dim per-room work light that comes on with the generator so EVERY room is
--- faintly visible without the flashlight (the narrow MainLight spots weren't
--- enough). One soft white PointLight per section light fixture; shadows off to
--- stay in budget.
-local function setMainGlow(on: boolean)
-	for _, fixture in ipairs(CollectionService:GetTagged("EmergencyLight")) do
-		if fixture:IsA("BasePart") then
-			local glow = fixture:FindFirstChild("MainGlow")
-			if not glow then
-				glow = Instance.new("PointLight")
-				glow.Name = "MainGlow"
-				glow.Color = Color3.fromRGB(225, 232, 244)
-				glow.Brightness = 2.0
-				glow.Range = 30
-				glow.Shadows = false
-				glow.Parent = fixture
+-- on = the staged switch-on (rooms strike outward from the engine room);
+-- off = every work lamp dark at once and every emergency lantern back to full.
+local function setMainLights(on: boolean)
+	mainGeneration += 1
+	local gen = mainGeneration
+	local rooms: { [number]: { Instance } } = {}
+	for _, f in ipairs(CollectionService:GetTagged("MainLight")) do
+		local s = f:GetAttribute("Section") or 0
+		if not rooms[s] then rooms[s] = {} end
+		table.insert(rooms[s], f)
+	end
+	local lanternsBySection: { [number]: { Instance } } = {}
+	for _, lf in ipairs(CollectionService:GetTagged("EmergencyLight")) do
+		local s = lf:GetAttribute("Section") or 0
+		if not lanternsBySection[s] then lanternsBySection[s] = {} end
+		table.insert(lanternsBySection[s], lf)
+	end
+	if not on then
+		for _, lamps in pairs(rooms) do
+			for _, f in ipairs(lamps) do
+				setLamp(f, 0)
+				local light = f:FindFirstChildOfClass("SpotLight")
+				if light then light.Shadows = false end
 			end
-			;(glow :: PointLight).Enabled = on
 		end
+		for _, lf in ipairs(CollectionService:GetTagged("EmergencyLight")) do emergencyLevel(lf, 1, true) end
+		return
+	end
+	-- rooms without work lamps (the conning tower) keep their lantern at full
+	for s, lamps in pairs(rooms) do
+		local hops = SectionData.Distance(8, s)
+		if hops == math.huge then hops = 0 end
+		task.delay(hops * STRIKE_HOP_DELAY + math.random() * 0.15, function()
+			if mainGeneration == gen then strikeRoom(lamps, lanternsBySection[s] or {}, gen) end
+		end)
 	end
 end
 
 -- Emergency-light flicker: subtle + occasional (a runtime effect; not a strobe).
+-- The wall lanterns MapBuilder builds (LensColor attr, DD_LightCone beam, DD_Bounce
+-- fill) dim WITH the bulb, so the flicker reads on the source itself, and each lamp's
+-- FlickerCalm attr (>1 steadier, <1 twitchier) gives it its own temperament.
 local emergencyFlickerStarted = false
 local function startEmergencyFlicker()
 	if emergencyFlickerStarted then return end
@@ -128,24 +241,33 @@ local function startEmergencyFlicker()
 			if light:GetAttribute("BaseBrightness") == nil then
 				light:SetAttribute("BaseBrightness", light.Brightness)
 			end
+			local bounceAtt = fixture:FindFirstChild("DD_BounceAtt")
+			local bounce = bounceAtt and bounceAtt:FindFirstChildOfClass("PointLight")
+			local function level(k: number)
+				local b = light:GetAttribute("BaseBrightness") or light.Brightness
+				local full = light:GetAttribute("FullBrightness") or b
+				light.Brightness = b * k
+				if bounce then bounce.Brightness = (bounce:GetAttribute("BaseBrightness") or 0.6) * k end
+				paintLantern(fixture, k * (if full > 0 then b / full else 1))
+			end
 			task.spawn(function()
 				while light.Parent do
-					task.wait(1.5 + math.random() * 3)        -- 1.5-4.5s of steady dim red glow
+					local calm = fixture:GetAttribute("FlickerCalm") or 1
+					task.wait((1.5 + math.random() * 3) * calm)  -- 1.5-4.5s of steady dim red glow (x calm)
 					if light.Enabled then
-						local b = light:GetAttribute("BaseBrightness") or light.Brightness
 						-- flicker burst: surge brighter (washes the room red) then stutter down,
 						-- so the room visibly pulses red instead of only dimming.
 						for _ = 1, math.random(2, 5) do
-							light.Brightness = b * (1.3 + math.random() * 0.5)
+							level(1.3 + math.random() * 0.5)
 							task.wait(0.03 + math.random() * 0.05)
-							light.Brightness = b * (0.2 + math.random() * 0.3)
+							level(0.2 + math.random() * 0.3)
 							task.wait(0.03 + math.random() * 0.06)
 						end
 						if math.random() < 0.25 then
-							light.Brightness = b * 0.05
+							level(0.05)
 							task.wait(0.08 + math.random() * 0.12)
 						end
-						light.Brightness = b
+						level(1)
 					end
 				end
 			end)
@@ -170,7 +292,19 @@ function PowerManager.Reset()
 	PowerManager.State.emergencyPower = true
 	setEmergencyLights(true)
 	setMainLights(false)
-	setMainGlow(false)
+	-- a fresh run: generator stopped, radio dead again, fuse bay empty
+	for _, part in ipairs(CollectionService:GetTagged("Interactable")) do
+		local kind = part:GetAttribute("Kind")
+		if kind == "generator" then
+			part:SetAttribute("Running", false)
+			local hum = part:FindFirstChild("Snd_generator_hum")
+			if hum and hum:IsA("Sound") then hum:Stop() end
+		elseif kind == "radio" then
+			part:SetAttribute("Locked", true)
+		elseif kind == "ballast" then
+			part:SetAttribute("FuseInstalled", false)
+		end
+	end
 	broadcast()
 end
 
@@ -191,9 +325,8 @@ local function startGenerator(player: Player, generatorPart: BasePart)
 	PowerManager.State.mainPower = true
 	startingGenerator = false
 
-	-- effects
+	-- effects: the work lamps strike room by room, outward from the engine room
 	setMainLights(true)
-	setMainGlow(true)   -- dim room fill so you can see a little, generator-wide
 	Net.Event("SoundCue"):FireAllClients("power_surge", generatorPart.Position)
 	local hum = SoundData.Make("generator_hum", generatorPart, {
 		Looped = true, Volume = 0.6, RollOffMaxDistance = 160, RollOffMinDistance = 10,

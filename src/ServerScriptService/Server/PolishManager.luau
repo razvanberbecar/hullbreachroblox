@@ -5,8 +5,7 @@
 -- re-applies automatically every time MapBuilder (re)builds the sub — including
 -- after an ending soft-reset. Adds:
 --   * water-spray particles on hull breaches
---   * rising bubble emitters on each section's water plane (floor vents)
---   * spark bursts on a subset of emergency fixtures
+--   * spark bursts + a flash of light on the cut cable ends (DD_Sparker)
 -- Lighting, atmosphere and post-FX are configured in LightingSetup; the main
 -- light flicker is driven by PowerManager. PBR SurfaceAppearances need sourced
 -- textures — left as a documented follow-up so the greybox stays asset-free.
@@ -37,7 +36,8 @@ local function decorateBreach(breach: Instance)
 	if not breach:IsA("BasePart") then return end
 	if breach:FindFirstChild("SprayFX") then return end
 	local e = makeEmitter(breach, {
-		Rate = 80,
+		Texture = "rbxasset://textures/particles/smoke_main.dds",
+		Rate = 26,
 		Lifetime = NumberRange.new(0.6, 1.1),
 		Speed = NumberRange.new(18, 30),
 		SpreadAngle = Vector2.new(25, 25),
@@ -52,31 +52,19 @@ local function decorateBreach(breach: Instance)
 	e.Name = "SprayFX"
 end
 
-local function decorateWaterVents(water: Instance)
-	if not water:IsA("BasePart") then return end
-	if water:FindFirstChild("BubbleFX") then return end
-	local e = makeEmitter(water, {
-		Rate = 6,
-		Lifetime = NumberRange.new(2, 3.5),
-		Speed = NumberRange.new(2, 4),
-		SpreadAngle = Vector2.new(8, 8),
-		Color = ColorSequence.new(Color3.fromRGB(200, 230, 240)),
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.4),
-			NumberSequenceKeypoint.new(1, 1),
-		}),
-		Size = NumberSequence.new(0.25),
-		Acceleration = Vector3.new(0, 6, 0),
-		EmissionDirection = Enum.NormalId.Top,
-	})
-	e.Name = "BubbleFX"
-end
-
+-- The cut cable ends MapBuilder hangs out of the cable trays (DD_Sparker): a burst of
+-- sparks and a split-second flash of light on the walls around them.
 local function decorateSpark(fixture: Instance)
 	if not fixture:IsA("BasePart") then return end
 	if fixture:FindFirstChild("SparkFX") then return end
-	-- only ~1 in 4 fixtures sparks, for variety
-	if (fixture:GetAttribute("Section") or 0) % 4 ~= 0 then return end
+	local flash = Instance.new("PointLight")
+	flash.Name = "DD_SparkFlash"
+	flash.Color = Color3.fromRGB(255, 196, 130)
+	flash.Brightness = 5
+	flash.Range = 13
+	flash.Shadows = false
+	flash.Enabled = false
+	flash.Parent = fixture
 	local e = makeEmitter(fixture, {
 		Rate = 0,
 		Lifetime = NumberRange.new(0.2, 0.5),
@@ -89,9 +77,18 @@ local function decorateSpark(fixture: Instance)
 	e.Name = "SparkFX"
 	task.spawn(function()
 		while e.Parent do
-			task.wait(2 + math.random() * 6)
-			e:Emit(math.random(4, 10))
-			Net.Event("SoundCue"):FireAllClients("electrical_spark", fixture.Position)
+			task.wait(3 + math.random() * 9)
+			e:Emit(math.random(5, 12))
+			Net.Event("SoundCue"):FireAllClients("electrical_spark", fixture.Position, 0.4)
+			flash.Enabled = true
+			task.wait(0.05 + math.random() * 0.06)
+			flash.Enabled = false
+			if math.random() < 0.4 then -- a stutter
+				task.wait(0.05)
+				flash.Enabled = true
+				task.wait(0.04)
+				flash.Enabled = false
+			end
 		end
 	end)
 end
@@ -151,6 +148,14 @@ end
 local function startSetPieces()
 	local Players = game:GetService("Players")
 	local seen = {} -- [player] = {[section]=true}
+	local nextSighting = 0
+	-- lights drifting past the tower viewports (drawn on the client by WaterRenderer)
+	local function sighting()
+		for _, w in ipairs(CollectionService:GetTagged("DD_TowerWindow")) do
+			w:SetAttribute("Sighting", os.clock())
+		end
+		nextSighting = os.clock() + 50 + math.random() * 70
+	end
 	local function reset(p) seen[p] = {} end
 	local function watch(p) p.CharacterAdded:Connect(function() reset(p) end) end
 	Players.PlayerRemoving:Connect(function(p) seen[p] = nil end)
@@ -172,7 +177,12 @@ local function startSetPieces()
 						elseif sec == 7 then
 							Net.Event("SoundCue"):FireAllClients("creature_rumble", hrp.Position)
 							Net.Event("Notify"):FireClient(p, "Far out in the black water, distant lights drift past the tower glass — vast and slow — then gone.")
+							sighting()
 						end
+					elseif sec == 7 and os.clock() >= nextSighting then
+						-- linger in the tower and they come back
+						Net.Event("SoundCue"):FireAllClients("creature_rumble", hrp.Position, 0.22)
+						sighting()
 					end
 				end
 			end
@@ -184,8 +194,7 @@ function PolishManager.Start()
 	if started then return end
 	started = true
 	hook("HullBreach", decorateBreach)
-	hook("WaterPlane", decorateWaterVents)
-	hook("EmergencyLight", decorateSpark)
+	hook("DD_Sparker", decorateSpark)
 	startAmbientAudio()
 	startSetPieces()
 	if GameConfig.Debug then

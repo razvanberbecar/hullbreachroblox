@@ -41,7 +41,7 @@ InteractionManager.Notify = notify
 local function setDoorOpen(door: BasePart, open: boolean)
 	door:SetAttribute("Open", open)
 	door.CanCollide = not open
-	door.Transparency = open and 0.7 or 0
+	-- (the door part itself stays invisible: WaterRenderer slides its DD_DoorLeaf on the Open attr)
 	local prompt = door:FindFirstChild("DoorPrompt") :: ProximityPrompt?
 	if prompt then
 		prompt.ActionText = open and "Close" or "Open"

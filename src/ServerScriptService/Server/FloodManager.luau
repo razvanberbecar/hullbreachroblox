@@ -75,7 +75,6 @@ function FloodManager.SealDoor(a: number, b: number): boolean
 			door:SetAttribute("Open", false)
 			if door:IsA("BasePart") then
 				door.CanCollide = true
-				door.Transparency = 0
 				door.Color = Color3.fromRGB(120, 40, 30)
 				local open = door:FindFirstChild("DoorPrompt")
 				local seal = door:FindFirstChild("SealPrompt")

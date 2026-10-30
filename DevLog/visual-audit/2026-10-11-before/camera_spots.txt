@@ -1,0 +1,13 @@
+Hull Breach visual audit - camera spots (Scriptable camera, FOV 70, wait 2-2.5s before capture so lighting settles)
+Section centre X: s1=0 s2=56 s3=112 s4=168 s5=224 s6=280 s8=336 s9=392 (floor y=0)
+s1  eye (-19,4.8,0)  -> look (20,3.5,-4)      [00/01 player view at spawn; 02 used (-20,4.8,-5)->(20,4,4)]
+s2  eye (37,4.8,0)   -> look (76,3.5,-4)      [03 used (36,4.8,-5)->(76,4,4)]
+s3  eye (93,4.8,0)   -> look (132,3.5,-4)     [04 used (92,4.8,-5)->(132,4,4)]
+s4  eye (149,4.8,0)  -> look (188,3.5,2)      [05 used (147,4.8,0)->(188,3.5,-4)]
+s5  eye (205,4.8,0)  -> look (244,3.5,-4)
+s6  eye (261,4.8,0)  -> look (300,3.5,-4)
+s7  eye (227.5,23.8,3.5) -> look (221,22,-3)
+s8  eye (317,4.8,0)  -> look (356,3.5,4)      [09 used look (356,3.5,-4)]
+s9  eye (373,9,0)    -> look (412,6,-4)       (room was fully flooded this run)
+underwater: character HRP at (374,3,0) facing +X, normal first-person camera (overlay only shows when the HEAD is under)
+Main power was reproduced exactly as PowerManager.setMainLights/setMainGlow do (minus the flicker loop); flashlight via the BatteryUpdate remote.

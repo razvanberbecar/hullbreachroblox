@@ -116,68 +116,118 @@ local function spawnCreature()
 	body.Size = Vector3.new(4, 9, 4)
 	body.Anchored = true
 	body.CanCollide = false
-	body.CastShadow = true
-	body.Color = Color3.fromRGB(8, 8, 10)
-	body.Material = Enum.Material.SmoothPlastic
-	body.Transparency = 0.5  -- the core mass stays murky; the welded shape gives the silhouette
-	body.Color = Color3.fromRGB(14, 18, 24)
+	body.CastShadow = false
+	body.Transparency = 1  -- the logic root (position + facing); everything you see hangs off it
 	local startPos = SectionData.SectionCenter(startSection)
 	body.CFrame = CFrame.new(startPos.X, 4.5, 0)
 	body.Parent = model
 	model.PrimaryPart = body
 
 	-- ---- a strange deep-sea creature, welded to the body (-Z = front/face) ----
-	local DARK = Color3.fromRGB(18, 22, 30)
-	local function piece(name: string, size: Vector3, offset: CFrame, opts)
-		opts = opts or {}
+	-- No boxes and no assets: the mass is overlapping ellipsoids (SpecialMesh spheres) in
+	-- unlit near-black Neon, so the flashlight can't reveal it: lit materials wash out pale
+	-- under the beam whatever their colour, and this reads the same at every graphics level.
+	-- Every limb is a tapered, curving Beam that WaterRenderer keeps writhing.
+	-- (No mouth, no eyes: by request it stays a pure silhouette and its only glow is
+	-- the anglerfish lure.)
+	local DARK = Color3.fromRGB(5, 6, 8)
+	local function flesh(name: string, size: Vector3, offset: CFrame, castShadow: boolean?)
 		local p = Instance.new("Part")
 		p.Name = name
 		p.Size = size
-		p.Color = opts.color or DARK
-		p.Material = opts.material or Enum.Material.SmoothPlastic
-		p.Transparency = opts.transparency or 0.2
+		p.Color = DARK
+		p.Material = Enum.Material.Neon
+		p.Reflectance = 0
+		p.Transparency = 0
 		p.Anchored = false
 		p.CanCollide = false
-		p.CastShadow = opts.castShadow == true
-		if opts.shape then p.Shape = opts.shape end
+		p.CanTouch = false
+		p.CanQuery = false
+		p.CastShadow = castShadow == true
 		p.CFrame = body.CFrame * offset
 		p.Parent = body
+		local m = Instance.new("SpecialMesh")
+		m.MeshType = Enum.MeshType.Sphere
+		m.Parent = p
 		local w = Instance.new("WeldConstraint")
 		w.Part0 = body; w.Part1 = p; w.Parent = p
 		return p
 	end
+	local function angled(x: number, y: number, z: number, pitch: number)
+		return CFrame.new(x, y, z) * CFrame.Angles(math.rad(pitch), 0, 0)
+	end
+	flesh("DD_Head", Vector3.new(3.5, 3, 4.6), angled(0, 3.1, -0.9, -12), true)
+	flesh("DD_Snout", Vector3.new(2.3, 1.7, 3.2), angled(0, 2.6, -3.2, -14))
+	flesh("DD_Hump", Vector3.new(2.7, 4.2, 3.1), angled(0, 3, 1.1, 20))
+	flesh("DD_Thorax", Vector3.new(3.8, 5.8, 3.8), CFrame.new(0, 1, 0.2), true)
+	flesh("DD_Belly", Vector3.new(3.1, 5.2, 3.2), CFrame.new(0, -1.4, 0.55))
+	flesh("DD_Tail", Vector3.new(2, 3.6, 2.2), CFrame.new(0, -3.1, 0.9))
 
-	-- head + snout
-	piece("DD_Head", Vector3.new(3.6, 3.2, 3.8), CFrame.new(0, 3, -0.6), { color = Color3.fromRGB(20, 24, 32), transparency = 0.12, shape = Enum.PartType.Ball, castShadow = true })
-	piece("DD_Snout", Vector3.new(2.3, 1.9, 2.6), CFrame.new(0, 2.3, -2.2), { color = Color3.fromRGB(16, 20, 28), transparency = 0.12, shape = Enum.PartType.Ball })
-	-- (gaping maw + ragged teeth removed by request — no mouth)
-	-- anglerfish lure on a drooping stalk
-	piece("DD_Stalk", Vector3.new(0.18, 0.18, 2.4), CFrame.new(0, 4.7, -2.0) * CFrame.Angles(math.rad(40), 0, 0), { color = Color3.fromRGB(12, 16, 22), transparency = 0.05, shape = Enum.PartType.Cylinder })
-	local lure = piece("DD_Lure", Vector3.new(0.55, 0.55, 0.55), CFrame.new(0, 5.5, -3.5), { color = Color3.fromRGB(120, 230, 205), transparency = 0, shape = Enum.PartType.Ball, material = Enum.Material.Neon })
-	local lglow = Instance.new("PointLight"); lglow.Color = Color3.fromRGB(90, 210, 185); lglow.Brightness = 0.8; lglow.Range = 9; lglow.Shadows = false; lglow.Parent = lure
-	-- side gill-fins
-	for _, sx in ipairs({ -1, 1 }) do
-		piece("DD_Fin", Vector3.new(0.2, 2.8, 3.2), CFrame.new(sx * 2.1, 1.4, 0.6) * CFrame.Angles(0, math.rad(sx * 22), math.rad(sx * 14)), { transparency = 0.4 })
+	local function perpendicular(v: Vector3): Vector3
+		local c = v:Cross(Vector3.new(0, 1, 0))
+		if c.Magnitude < 0.1 then c = v:Cross(Vector3.new(1, 0, 0)) end
+		return c.Unit
+	end
+	local function aim(a: Attachment, axis: Vector3)
+		a.Axis = axis.Unit
+		a.SecondaryAxis = perpendicular(axis.Unit)
+	end
+	-- one limb: from/to in body space, curve size at each end, width at each end
+	local function strand(name: string, from: Vector3, to: Vector3, dir0: Vector3, dir1: Vector3, c0: number, c1: number, w0: number, w1: number, sway: number, transparency: number?)
+		local a0 = Instance.new("Attachment") ; a0.Name = name .. "A" ; a0.Position = from ; a0.Parent = body
+		local a1 = Instance.new("Attachment") ; a1.Name = name .. "B" ; a1.Position = to ; a1.Parent = body
+		aim(a0, dir0) ; aim(a1, dir1)
+		local b = Instance.new("Beam")
+		b.Name = name ; b.Attachment0 = a0 ; b.Attachment1 = a1
+		b.Color = ColorSequence.new(DARK) ; b.LightInfluence = 1 ; b.LightEmission = 0
+		b.Transparency = NumberSequence.new(transparency or 0.03)
+		b.FaceCamera = true ; b.Segments = 14
+		b.Width0 = w0 ; b.Width1 = w1 ; b.CurveSize0 = c0 ; b.CurveSize1 = c1
+		b:SetAttribute("Sway", sway) ; b:SetAttribute("C0", c0) ; b:SetAttribute("C1", c1)
+		b:SetAttribute("Phase", math.random() * 10)
+		b.Parent = body
+		return b
+	end
+	-- tentacles splayed round the lower body, curling out along the floor
+	for k = 1, 8 do
+		local ang = math.rad(k * 45 + (k % 3) * 11)
+		local out = Vector3.new(math.cos(ang), 0, math.sin(ang))
+		local reach = 3 + (k % 3) * 0.7
+		strand("DD_Tentacle", out * 1.1 + Vector3.new(0, -2.4, 0.6), out * reach + Vector3.new(0, -4.35, 0.8), out + Vector3.new(0, -0.8, 0), out + Vector3.new(0, 0.5, 0), 2.2, -1.2, 0.78, 0.06, 0.9)
+	end
+	-- two long, thin forelimbs hanging from the shoulders
+	for _, s in ipairs({ -1, 1 }) do
+		strand("DD_Forelimb", Vector3.new(s * 1.7, 2.3, -0.5), Vector3.new(s * 2.7, -3.9, -1.9), Vector3.new(s, -0.2, -0.3), Vector3.new(0, -1, -0.4), 2.4, 1.6, 0.52, 0.04, 0.7)
+		-- gill membranes
+		for g = 0, 1 do
+			strand("DD_Gill", Vector3.new(s * 1.8, 2 - g * 1.2, 0.1), Vector3.new(s * 3.5, 0.6 - g * 1.4, 1.7), Vector3.new(s, 0.3, 0.2), Vector3.new(s, -0.4, 0.7), 0.8, 0.8, 0.55, 0.08, 0.5, 0.3)
+		end
 	end
 	-- dorsal spines down the back (+Z)
 	for i = 0, 4 do
-		piece("DD_Spine", Vector3.new(0.18, 1.4 - i * 0.18, 0.7), CFrame.new(0, 3.6 - i * 1.3, 1.9) * CFrame.Angles(math.rad(18), 0, 0), { color = Color3.fromRGB(14, 18, 26), transparency = 0.05 })
+		local y = 4.2 - i * 1.25
+		local z = 1.9 + math.sin(i * 0.6) * 0.5
+		strand("DD_Spine", Vector3.new(0, y, z - 0.3), Vector3.new(0, y + 0.7, z + 1.5 - i * 0.12), Vector3.new(0, 0.3, 1), Vector3.new(0, 0.7, 1), 0.3, 0.3, 0.34, 0.01, 0.08)
 	end
-	-- splayed tentacles around the lower body
-	local tent = {
-		{ x = -1.4, z = -1.1, pitch = 18, roll = 24 },
-		{ x = 1.4, z = -1.1, pitch = 18, roll = -24 },
-		{ x = -1.7, z = 0.7, pitch = -8, roll = 32 },
-		{ x = 1.7, z = 0.7, pitch = -8, roll = -32 },
-		{ x = -0.6, z = 1.4, pitch = -20, roll = 8 },
-		{ x = 0.7, z = 1.4, pitch = -20, roll = -10 },
-	}
-	for idx, t in ipairs(tent) do
-		piece("DD_Tentacle" .. idx, Vector3.new(0.5, 3.6, 0.5), CFrame.new(t.x, -1.6, t.z) * CFrame.Angles(math.rad(t.pitch), 0, math.rad(t.roll)), { transparency = 0.18 })
-	end
-
-	-- (eyes + red eye-glow removed by request — the creature reads as a pure silhouette,
-	--  its only glow being the anglerfish lure above)
+	-- anglerfish lure on a drooping stalk
+	local LURE_POS = CFrame.new(0, 5.5, -4.3)
+	local lure = Instance.new("Part")
+	lure.Name = "DD_Lure"
+	lure.Shape = Enum.PartType.Ball
+	lure.Size = Vector3.new(0.62, 0.62, 0.62)
+	lure.Color = Color3.fromRGB(120, 230, 205)
+	lure.Material = Enum.Material.Neon
+	lure.Anchored = false
+	lure.CanCollide = false
+	lure.CanTouch = false
+	lure.CanQuery = false
+	lure.CastShadow = false
+	lure.CFrame = body.CFrame * LURE_POS
+	lure.Parent = body
+	local lw = Instance.new("WeldConstraint")
+	lw.Part0 = body; lw.Part1 = lure; lw.Parent = lure
+	local lglow = Instance.new("PointLight"); lglow.Name = "DD_LureGlow"; lglow.Color = Color3.fromRGB(90, 210, 185); lglow.Brightness = 1.4; lglow.Range = 14; lglow.Shadows = false; lglow.Parent = lure
+	strand("DD_Stalk", Vector3.new(0, 4.3, -1.6), LURE_POS.Position, Vector3.new(0, 1, -0.5), Vector3.new(0, 1, -0.2), 1.9, -0.7, 0.2, 0.07, 0.12)
 
 	-- a soft point light-less marker; sound layers are on the client (Phase 8)
 	model.Parent = Workspace
@@ -201,6 +251,7 @@ function CreatureManager.SetState(newState: string)
 	if peaceful and newState == CreatureData.State.Hunting then return end
 	if state == newState then return end
 	state = newState
+	if creature then creature:SetAttribute("State", newState) end -- the client's lure pulse reads this
 	-- creepy screech the moment it's startled into a hunt (debounced)
 	if newState == CreatureData.State.Hunting and root and (os.clock() - lastStartleCue) > 3 then
 		lastStartleCue = os.clock()

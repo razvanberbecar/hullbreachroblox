@@ -8,6 +8,258 @@ Be factual — give script/instance paths, and for tuning changes give old → n
 
 ---
 
+## 2026-10-30 (later) — Claude (Razvan session) [Save and GitHub push; Razvan publishes]
+
+- Razvan reported not seeing the changes on their laptop, then tested again and confirmed they work. Publishing is left to Razvan.
+- No game code changed in this entry. All 35 game scripts in Studio match `src/` byte for byte. FreezeCreature=false, Debug=false, StreamingEnabled=false, QualityLevel=Automatic.
+- **Open, not investigated further:** the overhaul screenshots were taken with QualityLevel pinned to Level15. In a real run at Automatic on this laptop (GTX 1650 + AMD integrated; display on the AMD), the §1 spawn view was almost black, showing only red strips. The same spot at Level15, from a slightly different camera angle, showed lit rust walls. The Automatic shot was about 4s after spawn with the flashlight off, so it may not be the settled look. Players on Automatic may see much less of the dressing than the screenshots show.
+
+---
+
+## 2026-10-30 — Claude (Razvan session) [Visual overhaul: batches 3a–6 finished, flooding/doors/reset re-tested]
+
+No assets inserted or uploaded. Saved in Studio with Ctrl+S; **not published**. All values below live in the place and in `src/`.
+Screenshots: `DevLog/visual-audit/2026-10-30-final/`.
+
+**`ServerScriptService/Server/MapBuilder`** (1649 → 2670 lines; everything built in `Dress()`, no hand-placed parts):
+- `ddPart` now sets `CanTouch=false`.
+- **Hull (3a/3b):** `dressArch`, `dressFrames`, `pipeRun`, `dressPipes`, `dressCableTray`; `dressIndustrial(folder, cx, i)` replaces the old version. Ribs at `FRAME_OFFSETS` every 6 studs, pipe bundles, valves, gauges, sagging cable Beams.
+- **Doors + frames (3c):** `dressBulkheadDoors`, `dressDoorFace`, `dressDoorFrames`. The `BulkheadDoor` part is now an **invisible logic part**; the visible `DD_DoorLeaf` slides on the client. Stencilled `WTD n`, hazard headers, `DD_SealBar` X shown when `Sealed`.
+- **Room machinery (3d):** `dressTorpedoRoom` (tubes laid horizontally through the bow wall), `dressBerthingDetail`, `dressGalleyDetail`, `dressOfficersDetail`, `dressControlRoom`, `dressSonarDetail`, `dressEngineRoom` (generator reskin, flywheel, status panel bound to `Running`), `dressAftDetail`. Screens bound to game state: ballast → `FuseInstalled`, radio → `Locked`.
+- **Grime (2b):** `wallGrime` SurfaceGuis (tide band, salt line, streaks), room signs, warnings, three scrawls: §2 "DON'T RUN", §6 "IT'S LISTENING", §8 "IT COMES WHEN THE LIGHTS DO".
+- **Effects (4b):** `addDrip`, `addSteam`, `addSparker`, `dressEffects`, three shaft Beams at the §9 breach.
+- **Tower (6):** `towerWindow`, `dressTower`. Round viewports with marine snow. On `Sighting`, a soft black band (`DD_SightMass`) eclipses the glass with 5 faint lights on its flank.
+- `dressSurvivorsWall`: y 8 → **10.9** (the re-laid tube lids covered the bottom of the board).
+- `dressTorpedoRoom`: `PodWindow` Glass, Reflectance 0.3 → **SmoothPlastic, 0.04, (12,20,28)** (the Glass mirrored the sky pale pink).
+- Tweaks: DD_DoorLamp y → DH+1.5; DD_StoveRing y → 3.3; lantern bounce 0.6 → 1.0.
+
+**`ServerScriptService/Server/CreatureManager`** (`spawnCreature` rewritten, batch 5): invisible logic root, faceless ellipsoids + Beams (8 tentacles, 2 forelimbs, 4 gills, 5 spines, lure stalk). `SetState` sets attribute `State`.
+- Body material: **Neon (5,6,8), Transparency 0** (near-black, unlit). SmoothPlastic, Slate, Fabric and CorrodedMetal all washed out pale under the flashlight whatever their colour, which looked like a white egg. Unlit, it reads as a moving void and looks the same at every quality level.
+- Sizes: Head (3.5,3,4.6), Snout (2.3,1.7,3.2), Hump (2.7,4.2,3.1), Thorax (3.8,5.8,3.8), Belly (3.1,5.2,3.2), Tail (2,3.6,2.2). Gill Width0 1.5 → 0.55 (they read as paper triangles).
+
+**`StarterPlayer/StarterPlayerScripts/Client/WaterRenderer`** (client side of all of the above):
+- Water (4c): surface (58,96,106); volume transparency now `0.78 - 0.5*depth` with depth = clamp(level/45), so shallow floors stay visible under the torch; colour (26,60,66) → (4,16,24) with depth. Foam strips, 7 debris pieces per room, ripple emitters at drips, soft bubbles. Animates only within 75 studs of the camera.
+- Underwater motes + breath bubbles on a `mouth` attachment.
+- World animation: door slide (`DOOR_SLIDE` 7.5, 0.85 s tween on `Open`), flywheel on `Running`, `DD_Blink` LEDs, sonar sweep, tower sighting (18 s), creature limb sway + lure pulse (faster when `State == "hunting"`).
+
+**`ServerScriptService/Server/PolishManager`:** breach spray gets the soft texture, Rate 80 → 26; `decorateWaterVents` removed; `decorateSpark` hooks `DD_Sparker` (flash light + sound); tower sighting fires on first §7 entry, then every 50–120 s while you linger.
+
+**`ServerScriptService/Server/InteractionManager` / `FloodManager`:** removed `door.Transparency` writes (the logic part stays invisible).
+
+**`ServerScriptService/Server/PowerManager.Reset` (bug fix, not visual):** now resets generator `Running`, stops `Snd_generator_hum`, relocks the radio and clears `FuseInstalled`. Before this, the radio stayed unlocked and the hum kept playing after Try Again.
+
+**`StarterPlayer/StarterPlayerScripts/Client/FlashlightController`:** dust gets the soft dot texture (the default particle texture is a star).
+
+**`StarterPlayer/StarterPlayerScripts/Client/MenuUI`:** `menuButton` restyled (dark, Oswald 22, thin rust stroke, 4 px rust left bar, hover tween).
+
+**Tested in a real run (PLAY pressed, Studio):**
+- Flood: all 8 water volumes rise. Door 1-2 open: §1 and §2 equalised (1.84/1.85 → 1.93/1.93). Close works. Leaf slides 7.5 studs and back; `CanCollide` follows `Open`.
+- Seal door 2-3: `Sealed=true`, bars show, both prompts disabled.
+- Generator: `Running`, radio unlocks, hum on, 15 main lights lit.
+- `RequestResetRun`: generator off, hum off, radio locked, 0 main lights, seal cleared and bars hidden, water back near start levels 5 s later (§8 already at 1.65 against a 0.96 start, because the character stood in it and it floods fast once discovered).
+- Console clean except the usual Studio DataStore warning. `FreezeCreature` and `Debug` are false. `StreamingEnabled` false.
+
+**Counts in Play (emergency circuit):** parts 3012, enabled lights 41, shadow casters 9, emitters 78, SurfaceGuis 128, beams 61. **Parts are over the ~2100 planned.**
+
+**Not verified:**
+- Frame rate on a real PC or phone (Studio numbers aren't representative).
+- Motion overall: door slide feel, limb sway, the sighting pacing. Only stills and state readbacks were checked.
+- Drip ripple rings (`explosion01_shockwave_main.dds` path) were never seen on screen.
+- The final tower colour and light-size tweak (gradient (13,42,60) → (18,54,76), lights about 30% smaller) wasn't re-shot.
+- Level01 was checked in §3 only, before the creature went Neon.
+- Co-op and anything needing a published server.
+
+**Still open:** the creature can wander into §1 while dormant, although CLAUDE.md says it never *starts* there (noted earlier, unchanged).
+
+---
+
+## 2026-10-11 — Claude (Razvan session) [Visual overhaul batch 4a: flashlight]
+
+**`StarterPlayer/StarterPlayerScripts/Client/FlashlightController`** (build v7 → **v8**, "core+spill"):
+- Beam: one SpotLight (Angle 30, Range 55, Brightness 5) → **Core** (Angle 26, Range 60, Brightness **14**) plus **Spill**
+  (Angle 75, Range 32, 0.43 × core) on Attachment `SpillOrigin` (0, −0.35, 0.3). Both stay always-enabled; brightness drives them.
+  The `FlashlightColor` cosmetic tints both. Low-battery flicker unchanged.
+- NEW near-surface dimming: one raycast/frame along the beam; within 6 studs brightness scales down to 35% (no white
+  blow-out on glossy screens point blank; verified 14 → 8.7).
+- Dust: an emitter riding the camera (Rate 10, flat dots) → a box volume `FlashlightDust` (10×7×16) kept 9 studs ahead,
+  Rate 30, LightInfluence 1 (motes only show where lit: they sparkle in the beam). Always on (~30 particles/s).
+- In-hand torch: + 5 rubber knurl rings, tail cap, neck, bright bezel, pocket clip (8 → 14 parts).
+- Feel: the beam's aim trails fast turns by ~60 ms (lerp dt×16) and the model bobs with walking speed.
+**Found, not fixed (→ batch 4c):** every room's floor sits under the dark water volume (WaterRenderer, (12,36,48) at ~0.35
+transparency), which swallows the beam: floors read near-black even under the torch.
+Verified: Stop→Play console clean, values read back, A/B in §6 radio half (dim room) at Q15. Studio test learning: a brightness-3.5
+spill was invisible on these dark wet PBR surfaces; Roblox spotlights need ~6+ here to read.
+
+---
+
+## 2026-10-11 — Claude (Razvan session) [Visual overhaul batch 2a: hull surfaces (walls, bulkheads, ceilings, floors)]
+
+**Bug found:** every hull floor (`Floor`, `CorrFloor`, `TowerFloor`) was `Material=CorrodedMetal` with
+`MaterialVariant="deepdescent_floor_grate"`, but that variant's BaseMaterial is **DiamondPlate**. A variant only renders
+on its own base material, so the grate never showed and floors were plain built-in CorrodedMetal (the bright, noisy floor
+from the audit). Also, every wall in every room was the same `MG-Rust 30` (blue paint with white flecks).
+
+**`ServerScriptService/Server/MapBuilder`** — NEW `dressSurfaces(model, i)` (per section, called first in the Dress loop) and
+`dressConnectorSurfaces()` (after the loop), tables `WALL_FINISH` / `SURF`. Runtime only: the baked parts keep their Edit values.
+- Side walls (`WallZpos/Zneg`, `TowerWall*`, `CaptainWall*`): Metal + per-room variant. §1 MG-Rust 24 (dark steel, streaks),
+  §2 32 (navy paint), §3 15 and §4 18 (cream paint, peeling), §5 28 (blue-grey), §6 29 (slate), §7 24, §8 14 (rust running
+  down), §9 05 (rust with teal growth). Colour (54,60,66) → **(72,72,74)**; §3/§4 **(64,62,60)** (96 was tried: too bright under tungsten).
+- Bulkheads (`EndWall*`, `SternCap*`) + connector walls (`CorrWall*`): **CorrodedMetal + `deepdescent_hull_rust1`** (riveted plate), (110,104,100).
+- Ceilings (`Ceiling`, `TowerCeil`, `CorrCeil`): MG-Rust 30 → **MG-Rust 24**, (44,46,50).
+- Floors: CorrodedMetal → **DiamondPlate** (the `deepdescent_floor_grate` variant now renders), colour (46,50,54) → (58,60,62).
+- `dressSonarRadio`: partition `DD_Part*` → `deepdescent_hull_rust` (riveted rust plate), (100,96,92).
+- Side effect: the §4 captain-wall hot specular streak from 1c is gone (different variant roughness).
+- Unused/empty variants found (render flat grey): `deepdescent_hull_rust3`, `deepdescent_floor_grate1-3`, `deepdescent_console2-3`.
+
+No new assets (only variants already in MaterialService). No light/part changes. Nothing reads floor material (footsteps
+only check for Air). Verified: Stop→Play console clean, materials read back at runtime, quality Level01 still textured.
+Before/after + a swatch board of all 32 MG-Rust + the deepdescent variants: `DevLog/visual-audit/2026-10-11-2a/`.
+
+---
+
+## 2026-10-11 — Claude (Razvan session) [Visual overhaul batch 1d: colour grades for emergency / main power / underwater]
+
+**`StarterPlayer/StarterPlayerScripts/Client/WaterRenderer`** — NEW client colour-grade state machine (table `GRADES`,
+`applyGrade`, `refreshGrade`). It tweens the server-made `DeepColorCorrection`, `DeepBloom`, `DeepAtmosphere`,
+`Lighting.Ambient` and `UnderwaterBlur` locally:
+- **emergency:** CC B −0.04 / C 0.22 / S −0.28 / tint (222,218,234); Bloom 1.0 / thr 0.9; Ambient (10,17,28).
+  (Old grade B −0.05 / C 0.12 / S −0.25 / tint (190,215,235): the cool tint cut the red channel by ~25%.)
+- **main:** CC B 0 / C 0.18 / S −0.12 / tint (255,236,212) (warm tungsten over navy shadows); Bloom 0.9 / thr 1.0.
+- **underwater:** CC B −0.03 / C 0.08 / S −0.3 / tint (95,190,205); Bloom 1.3 / thr 0.75; Atmosphere Density 0.42 → 0.9,
+  Haze 2.4 → 4, Offset 0.1 → 0.2, teal colour/decay (gives real short visibility indoors); blur 8 → **3**; Ambient (8,22,30).
+- Transitions: under 0.25 s, surfacing 0.9 s; emergency→main 2.6 s after a 0.4 s delay (warms as the lamps strike);
+  main→emergency (reset) 0.6 s. Listens to `PowerUpdate` (first client listener).
+- `SubmergedOverlay`: the flat full-screen teal frame at 0.38 → a faint teal body (0.85) + 4 dark `UIGradient` edge frames
+  (a vignette, 0.1), with **DisplayOrder −1** so the HUD stays above it, untinted.
+- Fix: the submerged check no longer `return`s early when the head/section is missing (a death underwater could leave the
+  underwater state stuck); reverb is only set on change.
+
+**`ServerScriptService/Server/LightingSetup`** — boot values now = the emergency grade: `DeepColorCorrection` B −0.05 → −0.04,
+C 0.12 → 0.22, S −0.25 → −0.28, tint (190,215,235) → (222,218,234); `Lighting.Ambient` (8,14,22) → (10,17,28).
+
+Verified: Stop→Play console clean; client values read back per state (emergency at boot, underwater when the head is under,
+back to emergency on surfacing, main ~3 s after a real generator start); quality Level01 main power readable.
+Before/after: `DevLog/visual-audit/2026-10-11-1d/`. **Not verifiable in stills:** the blend timing itself.
+Capture gotcha: `prompt:InputHoldBegin()` only triggers once the prompt is SHOWN, which needs the camera near it,
+not just the character.
+
+---
+
+## 2026-10-11 — Claude (Razvan session) [Visual overhaul batch 1c: warm tungsten main power + staged switch-on]
+
+**Correction to the audit entry below:** the baked MainLight SpotLights already had `Shadows=false` (Angle 100,
+Range 34). The old source code says `true`, but the baked instances differ. So main power did NOT add 16 shadow casters:
+it was 12 shadow casters on either circuit before 1b, and it is 9 now on either circuit.
+
+**`ServerScriptService/Server/MapBuilder`** — NEW `dressMainLamps(folder, model, i, cx)`, called in `Dress()` after
+`dressEmergencyLighting`. Each tagged `MainFixture` (baked 3×0.4×1 box at y=15.6, z=±6) becomes a caged pendant at
+runtime: the fixture → 1.5×0.5×1.5 dark housing at y=14.1 (SpotLight kept: Face Bottom, Angle 100 → **105**,
+Range 34 → **30**, off), plus `DD_LampStem`, `DD_Bulb` (Ball 0.6, child of the fixture, dark Glass while off) and
+4 `DD_LampCage` bars. The +Z lamp of each room gets attr `MainShadows=true` and a `DD_MainFillAtt` attachment
+(at (lampX, 13, 0)) with PointLight `MainFill` (Range 34, off). §6 lamps move off the partition line to cx−7 (+Z, sonar
+half) / cx+7 (−Z, radio half).
+
+**`ServerScriptService/Server/PowerManager`** (now requires `SectionData`):
+- Main power colour: cool white (208,222,235) → **warm tungsten (255,196,140)**. SpotLight brightness 1.5 → **4.5**,
+  MainFill **1.2**. The old `MainGlow` (white PointLight b2/r30 parented to every emergency fixture) and
+  `setMainGlow` are REMOVED, as is the fluorescent `flickerLight`.
+- NEW staged switch-on: when the generator catches (after the existing 5 s spin-up), rooms strike in order of hull
+  distance from §8 (0.45 s per hop, +0–0.15 s jitter): 2–3 failed strikes → `electrical_spark` SoundCue (vol 0.35)
+  → the room's red lantern(s) drop to **30%** (bounce fill off, lens dims, shadows handed to the work lamp) → the
+  filaments warm from (255,110,40) to tungsten over ~0.7 s. The tower (no work lamps) keeps its lantern at full.
+- NEW tungsten brown-outs: every 5–14 s each room's lamps sag together to 45–75% (warmer colour) for 0.12–0.47 s.
+- Off (Start/Reset): every lamp dark, every lantern back to full output and its recorded shadows
+  (`FullBrightness` / `CastsShadows` attrs, recorded the first time). A `mainGeneration` counter stops stale threads.
+- Emergency flicker `level()` now scales the lens/cone by Base/Full brightness (dimmed lanterns flicker dimly).
+
+**Numbers (main power on):** enabled lights 56, shadow casters **9** (8 work lamps + breach), parts 979 (+96 lamp parts).
+Emergency power unchanged (9 shadow casters).
+
+Verified: Stop→Play console clean; generator triggered through its real ProximityPrompt (client `InputHoldBegin/End`)
+in frozen-capture mode; lamps lit, lanterns at 30%, shadows 9; Reset path checked (lamps/bulbs off, lanterns back to
+3.0 + shadows). Screens: `DevLog/visual-audit/2026-10-11-1c/` (BEFORE = audit's old main-power shots). Quality Level01
+on main power: readable. **Not verifiable in stills:** the strike/warm-up timing and the brown-outs (needs a real playtest).
+Studio gotcha: after a Studio restart the Automatic quality dropped low and captures went black, so pin
+`settings().Rendering.QualityLevel = Level15` while capturing (and restore Automatic).
+
+---
+
+## 2026-10-11 — Claude (Razvan session) [Visual overhaul batch 1b: per-room emergency lighting]
+
+Goal: replace the single centred red PointLight per room (a flat monochrome wash) with a lit composition:
+one shadow-casting "hero" lantern per room + bounce fill + shadowless practicals in each room's own colour.
+
+**`ServerScriptService/Server/MapBuilder`**
+- NEW `dressEmergencyLighting(folder, model, i, cx)` (+ helpers `dressLantern`, `practical`, `glowFrom`,
+  table `HERO_LAMP`), called from `Dress()` for every section after the room dressing.
+  - The baked, tagged `EmergencyFixture` is **moved at runtime** onto a side wall (y=11.5) and becomes the lens
+    of a caged lantern: cap, base, 4 cage bars, wall plate and arm (`DD_Lantern*`). Lens: Neon, colour (255,52,30),
+    attribute `LensColor`. It stays the tagged part, so PowerManager / PolishManager keep working.
+  - Hero light: Brightness 1.6 → **3**, Range 34 → **38**, Shadows on (the room's only shadow caster).
+    Per room (x offset from centre / wall): §1 −13/+Z, §2 +4/−Z, §3 −14/+Z, §4 −4/+Z, §5 +14/−Z, §6 −4/−Z,
+    §8 +4/−Z, §9 +6/+Z. `FlickerCalm` per lamp: §1 1.6, §2 1.0, §3 0.6 (twitchy), §4 1.2, §5 1.4, §6 1.0,
+    §8 0.5 (dying), §9 1.0.
+  - Per hero lamp: `DD_LightCone` (camera-facing Beam from the lens to the floor, transparency 0.82→1) and
+    `DD_Bounce` (shadowless PointLight under `DD_BounceAtt`, 7 studs into the room at y=2.5, Brightness 0.6, Range 30).
+  - **Conning tower fix:** its EmergencyFixture sat at (224,15.4,0), inside §5's ceiling, so §5 was lit twice and the
+    tower was black. It's now a small shadowless lantern inside the tower at (227,29,−1.5), Brightness 1.4, Range 16.
+  - `DD_DoorLamp` neon strip (170,30,18) over every doorway, inside each room (no light; reads at low quality).
+  - Practicals (all shadowless): §1 `DD_PodLamp` amber on the escape pod (1.4/9) + 4 `DD_TubeLamp` indicators;
+    §2 `DD_BunkLamp` warm (0.9/7); §3 `DD_StoveRing` pilot-light glow (1.2/8); §5 nav + helm screens → Neon green,
+    nav glow (0.8/8), `DD_BallastLamp` amber (0.7/6); §6 sonar screen → Neon green + glow (1.1/10);
+    §8 generator panel glow amber (1.0/9). §4 `CaptainLight` Shadows true → **false**.
+- `dressSonarRadio`: `DD_RadioFixture` light 1.6/34/shadows → **0.9/20/no shadows** (radio half stays dim).
+- `dressBreach`: `DD_BreachLightAnchor` moved from b+(−1.5,0,0) to **b+(−4,5,0)**, above the start waterline (under the
+  water it lit nothing); light (70,120,190) 1.5/18 → **(60,150,170) 2.2/26**, Shadows stay on. §9 now reads red bow
+  against cold teal stern.
+
+**`ServerScriptService/Server/PowerManager`** — `startEmergencyFlicker`: the lens colour (Lerp from (60,10,6) to
+`LensColor`), the `DD_LightCone` beam brightness and the `DD_Bounce` fill now dim WITH the bulb; the wait between
+bursts is ×`FlickerCalm`. Old fixtures without these attrs behave as before.
+
+**Numbers (runtime, emergency power):** shadow-casting lights 12 → **9** (8 hero lamps + breach). Enabled lights 25 → 39
+(+8 bounce, +6 practicals; all shadowless and short range). Parts 787 → 863.
+**Not done yet:** main power (`setMainGlow` still parents its white MainGlow to the moved lanterns), reworked in 1c.
+
+Verified: fresh Stop→Play, console clean; fixture positions/attrs read back; before/after for all 9 sections from the
+same camera spots in a frozen world (`DevLog/visual-audit/2026-10-11-1b/`); quality Level01: rooms dim red but readable,
+lanterns and door lamps visible, flashlight works.
+**Capture gotchas found:** Studio only computes lights near the player's character, so the character has to be near the
+camera for a valid shot (some black frames in the 2026-10-11 audit were artifacts). Captures need 3–6 s to settle after a
+camera jump. Freeze the world for captures by staying in the menu (`InMenu=true`), disabling the `MenuUI` LocalScript at
+runtime and hiding its GUI; the creature then can't kill and the water doesn't rise.
+
+---
+
+## 2026-10-11 — Claude (Razvan session) [Visual overhaul: audit + plan + batch 1a (post-FX cleanup)]
+
+Goal: push visuals toward Pressure/Doors level. Plan approved by Razvan (phases 1–6; main power will go
+**warm tungsten**; creature model edits in `CreatureManager` OK). Tools: official `roblox-studio` MCP
+(Luau Edit/Client/Server, Play screenshots, start/stop Play); Weppy is on **Basic**.
+
+**Audit (read-only):** every section shot in Play on emergency/main power, flashlight on/off, plus the
+underwater and menu views. Screenshots and camera spots: `DevLog/visual-audit/2026-10-11-before/`. Main findings:
+one centred red PointLight per room → monochrome red wash with black walls; main power = flat cool-white
+wash; box hull; primitive props; underwater = 38% teal GUI overlay over the HUD; **12 shadow-casting lights
+on emergency, 28 on main power** (all 16 MainLight spots have `Shadows=true`). At quality Level01 rooms are near-black.
+Side note (not fixed): the creature was seen wandering §1 while Dormant, incl. ~10 studs from spawn at run start.
+
+**Batch 1a — `ServerScriptService/Server/LightingSetup`:**
+- NEW: at start, destroys the place's starter Lighting effects that were stacking on the Deep* set:
+  `Lighting.Atmosphere` (grey, Density 0.3), `Lighting.Bloom` (I 1.0 / Size 24 / Thr 2.0), `Lighting.SunRays`,
+  `Lighting.DepthOfField` (disabled). Exact name+class match only; client-made `UnderwaterBlur` and
+  `DD_BrightnessCC` are untouched. The Edit-mode instances are left in place (removed at runtime).
+- `DeepBloom`: Intensity 0.6 → **1.0**, Size 24 → **28**, Threshold 1.4 → **0.9** (neon lenses, LEDs and the
+  creature lure get a soft halo; flashlight hotspot doesn't wash out).
+- Result: Lighting children at runtime 11 → 7 (one Atmosphere, one Bloom). Lights/particles/parts unchanged.
+
+Verified: fresh Stop→Play, Lighting = DeepColorCorrection, DeepDOF, DeepAtmosphere, DeepBloom(1.0/28/0.9), Sky,
+UnderwaterBlur, DD_BrightnessCC; console clean (only the usual Studio DataStore warning). Before/after
+from the same camera spots in one session: `DevLog/visual-audit/2026-10-11-1a/` (change is subtle: fixture
+halo + slightly stronger LED/lure glow). Low-quality (Level01) shot included as the baseline for 1b.
+
+---
+
 ## 2026-10-11 — Claude (Razvan session) [GitHub repo + script export + CLAUDE.md rewrite]
 
 **No changes to the Studio place this session** (read-only: script sources, `Workspace.Submarine`

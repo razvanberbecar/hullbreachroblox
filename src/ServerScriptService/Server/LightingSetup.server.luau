@@ -14,7 +14,7 @@ local Lighting = game:GetService("Lighting")
 -- the pcalls guard against a runtime denial aborting the rest of the mood setup.
 pcall(function() Lighting.LightingStyle = Enum.LightingStyle.Realistic end)
 pcall(function() Lighting.PrioritizeLightingQuality = true end)
-Lighting.Ambient = Color3.fromRGB(8, 14, 22)          -- deep navy fill
+Lighting.Ambient = Color3.fromRGB(10, 17, 28)         -- deep navy fill (= WaterRenderer's air grades)
 Lighting.OutdoorAmbient = Color3.fromRGB(2, 4, 8)     -- near-black exterior
 Lighting.Brightness = 0.6
 Lighting.ClockTime = 0                                 -- midnight
@@ -36,6 +36,21 @@ local function ensure(class: string, name: string): Instance
 	return inst
 end
 
+-- Strip the place's starter Lighting effects. Studio's default Atmosphere, Bloom,
+-- SunRays and DepthOfField were stacking on top of the Deep* set below (two
+-- Atmospheres fighting, two Blooms adding up, sun rays on the sea floor). Only
+-- these exact defaults go: UnderwaterBlur (WaterRenderer) and DD_BrightnessCC
+-- (MenuUI) are client-made and must stay.
+for _, spec in ipairs({
+	{ "Atmosphere", "Atmosphere" },
+	{ "BloomEffect", "Bloom" },
+	{ "SunRaysEffect", "SunRays" },
+	{ "DepthOfFieldEffect", "DepthOfField" },
+}) do
+	local inst = Lighting:FindFirstChild(spec[2])
+	if inst and inst.ClassName == spec[1] then inst:Destroy() end
+end
+
 -- Underwater haze
 local atmosphere = ensure("Atmosphere", "DeepAtmosphere") :: Atmosphere
 atmosphere.Density = 0.42
@@ -45,17 +60,22 @@ atmosphere.Decay = Color3.fromRGB(10, 20, 28)
 atmosphere.Glare = 0.1
 atmosphere.Haze = 2.4
 
--- Post-processing (Phase 9 tunes these further) -----------------------------
+-- Post-processing -------------------------------------------------------------
+-- These are the boot values = the EMERGENCY grade. WaterRenderer (client) blends
+-- each player between the emergency / main power / underwater grades from here.
 local cc = ensure("ColorCorrectionEffect", "DeepColorCorrection") :: ColorCorrectionEffect
-cc.Brightness = -0.05
-cc.Contrast = 0.12
-cc.Saturation = -0.25
-cc.TintColor = Color3.fromRGB(190, 215, 235)
+cc.Brightness = -0.04
+cc.Contrast = 0.22
+cc.Saturation = -0.28
+cc.TintColor = Color3.fromRGB(222, 218, 234)
 
+-- The only Bloom. Threshold sits just under the neon lenses / LEDs / creature lure
+-- so light sources get a soft halo, while lit walls (incl. the flashlight hotspot)
+-- stay below it and don't wash out.
 local bloom = ensure("BloomEffect", "DeepBloom") :: BloomEffect
-bloom.Intensity = 0.6
-bloom.Size = 24
-bloom.Threshold = 1.4
+bloom.Intensity = 1.0
+bloom.Size = 28
+bloom.Threshold = 0.9
 
 local dof = ensure("DepthOfFieldEffect", "DeepDOF") :: DepthOfFieldEffect
 dof.FarIntensity = 0.35

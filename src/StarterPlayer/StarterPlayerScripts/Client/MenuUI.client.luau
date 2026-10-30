@@ -11,6 +11,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
 local Lighting = game:GetService("Lighting")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 local MarketplaceService = game:GetService("MarketplaceService")
 
@@ -135,11 +136,26 @@ local bl = Instance.new("UIListLayout"); bl.Padding = UDim.new(0, 10)
 bl.HorizontalAlignment = Enum.HorizontalAlignment.Center; bl.Parent = btnHolder
 local function menuButton(text, order, cb)
 	local b = Instance.new("TextButton")
-	b.Size = UDim2.new(1, 0, 0, 44); b.BackgroundColor3 = Color3.fromRGB(22, 28, 34)
-	b.BackgroundTransparency = 0.1; b.BorderSizePixel = 0; b.AutoButtonColor = true
-	b.Font = Enum.Font.GothamMedium; b.TextSize = 18; b.TextColor3 = Color3.fromRGB(225, 232, 238)
-	b.Text = text; b.LayoutOrder = order; b.Parent = btnHolder
-	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 6); c.Parent = b
+	b.Size = UDim2.new(1, 0, 0, 44); b.BackgroundColor3 = Color3.fromRGB(12, 16, 20)
+	b.BackgroundTransparency = 0.22; b.BorderSizePixel = 0; b.AutoButtonColor = false
+	b.Font = Enum.Font.Oswald; b.TextSize = 22; b.TextColor3 = Color3.fromRGB(214, 208, 192)
+	b.Text = text; b.LayoutOrder = order; b.ClipsDescendants = true; b.Parent = btnHolder
+	local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 3); c.Parent = b
+	local st = Instance.new("UIStroke"); st.ApplyStrokeMode = Enum.ApplyStrokeMode.Border; st.Color = Color3.fromRGB(104, 66, 42); st.Transparency = 0.45; st.Thickness = 1; st.Parent = b
+	-- rust accent down the left edge, lit on hover
+	local bar = Instance.new("Frame"); bar.Size = UDim2.new(0, 4, 1, 0); bar.BackgroundColor3 = Color3.fromRGB(190, 90, 42)
+	bar.BackgroundTransparency = 0.55; bar.BorderSizePixel = 0; bar.Parent = b
+	local function hover(on: boolean)
+		local info = TweenInfo.new(0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		TweenService:Create(b, info, {
+			BackgroundColor3 = on and Color3.fromRGB(56, 28, 16) or Color3.fromRGB(12, 16, 20),
+			BackgroundTransparency = on and 0.05 or 0.22,
+			TextColor3 = on and Color3.fromRGB(255, 244, 224) or Color3.fromRGB(214, 208, 192),
+		}):Play()
+		TweenService:Create(bar, info, { BackgroundTransparency = on and 0 or 0.55 }):Play()
+	end
+	b.MouseEnter:Connect(function() hover(true) end)
+	b.MouseLeave:Connect(function() hover(false) end)
 	b.MouseButton1Click:Connect(cb)
 	return b
 end

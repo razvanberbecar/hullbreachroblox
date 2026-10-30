@@ -586,6 +586,7 @@ local function ddPart(parent, name, size, pos, color, material, shape)
 	local p = box(name, size, pos, color or DD.pipe, parent)
 	p.CanCollide = false
 	p.CanQuery = false
+	p.CanTouch = false
 	p.CastShadow = false
 	p.Material = material or Enum.Material.Metal
 	if shape then p.Shape = shape end
@@ -603,21 +604,195 @@ local function ddNeon(parent, name, pos, color, size)
 	return ddPart(parent, name, size or Vector3.new(0.4, 0.4, 0.3), pos, color, Enum.Material.Neon)
 end
 
--- generic industrial dressing for a normal (non-tower) hull section
-local function dressIndustrial(folder, cx)
-	ddCyl(folder, "DD_CeilPipeA", IL - 4, 0.6, Vector3.new(cx, IH - 1, IW / 2 - 3), "X", DD.pipe)
-	ddCyl(folder, "DD_CeilPipeB", IL - 4, 0.5, Vector3.new(cx, IH - 1.6, -IW / 2 + 3), "X", DD.rust)
-	ddPart(folder, "DD_Conduit",  Vector3.new(IL - 6, 0.5, 0.5),  Vector3.new(cx, 1.7, -IW / 2 + 1), DD.dark)
-	ddPart(folder, "DD_Conduit2", Vector3.new(IL - 6, 0.35, 0.35), Vector3.new(cx, 2.3, -IW / 2 + 1), DD.dark)
-	for i, ox in ipairs({ -10, 10 }) do
-		ddPart(folder, "DD_Ring" .. i .. "Top", Vector3.new(0.8, 0.8, IW - 1), Vector3.new(cx + ox, IH - 0.6, 0), DD.dark)
-		ddPart(folder, "DD_Ring" .. i .. "L", Vector3.new(0.8, IH - 2, 0.8), Vector3.new(cx + ox, (IH - 2) / 2, IW / 2 - 1), DD.dark)
-		ddPart(folder, "DD_Ring" .. i .. "R", Vector3.new(0.8, IH - 2, 0.8), Vector3.new(cx + ox, (IH - 2) / 2, -IW / 2 + 1), DD.dark)
+-- ----------------------------------------------------------------------------
+-- Pressure-hull structure (visual batches 3a/3b). The rooms are boxes, so this
+-- builds what makes them read as the inside of a hull: an arched cross-section
+-- (faceted plates rounding every wall/ceiling and wall/floor corner), a heavy
+-- frame every 6 studs following that arch, pipe bundles with flanges, hangers and
+-- paint bands, cable trays with sagging cables, and valves teed off the pipes.
+-- All of it is visual only (CanCollide/CanQuery/CanTouch off), so it can never
+-- block movement, prompts or the creature.
+-- ----------------------------------------------------------------------------
+local HULL = {
+	frame = Color3.fromRGB(58, 60, 64),
+	plate = Color3.fromRGB(62, 62, 64),
+	pipeSteel = Color3.fromRGB(84, 88, 92),
+	pipeRust = Color3.fromRGB(112, 72, 50),
+	pipeNavy = Color3.fromRGB(44, 60, 78),
+	pipeCopper = Color3.fromRGB(128, 88, 58),
+	tray = Color3.fromRGB(46, 48, 52),
+	cable = Color3.fromRGB(16, 16, 18),
+	bandRed = Color3.fromRGB(150, 44, 34),
+	bandYellow = Color3.fromRGB(176, 136, 44),
+	bandBlue = Color3.fromRGB(44, 86, 124),
+}
+local FRAME_OFFSETS = { -21, -15, -9, -3, 3, 9, 15, 21 }
+local ARCH_R = 3.4          -- radius of the upper corner arch
+local ARCH_Y = IH - ARCH_R  -- where the arch springs from the wall
+local ARCH_Z = IW / 2 - ARCH_R
+
+-- a box spanning two points in the Y/Z cross-section, running `len` along X
+local function crossBeam(parent, name, x, len, thick, y0, z0, y1, z1, color, material, variant)
+	local a, b = Vector3.new(x, y0, z0), Vector3.new(x, y1, z1)
+	local span = (b - a).Magnitude
+	local p = ddPart(parent, name, Vector3.new(len, thick, span + 0.06), (a + b) / 2, color, material)
+	-- part Z runs along the span; part Y is the plate's normal in the cross-section
+	p.CFrame = CFrame.lookAt((a + b) / 2, b, Vector3.new(1, 0, 0)) * CFrame.Angles(0, 0, math.rad(90))
+	if variant then p.MaterialVariant = variant end
+	return p
+end
+
+-- arc point at angle `deg` (0 = on the wall, 90 = on the ceiling) on side s (+1/-1)
+local function archPoint(deg: number, s: number, inset: number)
+	local r = ARCH_R - inset
+	return ARCH_Y + r * math.sin(math.rad(deg)), s * (ARCH_Z + r * math.cos(math.rad(deg)))
+end
+
+local function dressArch(folder, cx, ceilingVariant)
+	for _, s in ipairs({ -1, 1 }) do
+		-- upper corners: three plates rounding the wall into the ceiling
+		for seg = 0, 2 do
+			local y0, z0 = archPoint(seg * 30, s, 0.05)
+			local y1, z1 = archPoint((seg + 1) * 30, s, 0.05)
+			crossBeam(folder, "DD_ArchPlate", cx, IL, 0.3, y0, z0, y1, z1, HULL.plate, Enum.Material.Metal, ceilingVariant)
+		end
+		-- lower corners: a shallow bilge chamfer
+		crossBeam(folder, "DD_BilgePlate", cx, IL, 0.3, 1.5, s * (IW / 2 - 0.05), 0.02, s * (IW / 2 - 1.5), HULL.plate, Enum.Material.Metal, ceilingVariant)
 	end
-	ddPart(folder, "DD_Valve", Vector3.new(1.2, 1.2, 1), Vector3.new(cx - 6, 5, IW / 2 - 1.2), DD.rust)
-	ddCyl(folder, "DD_ValveWheel", 0.3, 2.2, Vector3.new(cx - 6, 5, IW / 2 - 2.1), "Z", DD.dark)
-	ddPart(folder, "DD_Gauge", Vector3.new(1.6, 1.6, 0.4), Vector3.new(cx + 6, 5.5, IW / 2 - 0.6), DD.dark)
-	ddNeon(folder, "DD_GaugeLED", Vector3.new(cx + 6.6, 6.1, IW / 2 - 0.85), Color3.fromRGB(60, 220, 90))
+end
+
+local function dressFrames(folder, cx)
+	local D = 0.85 -- how far a frame stands proud of the plating
+	for _, ox in ipairs(FRAME_OFFSETS) do
+		local x = cx + ox
+		local function frame(name, y0, z0, y1, z1)
+			local f = crossBeam(folder, name, x, 0.75, D, y0, z0, y1, z1, HULL.frame, Enum.Material.Metal, "MG-Rust 24")
+			f.CastShadow = true -- the lantern throws the frames' shadows down the room
+			return f
+		end
+		frame("DD_FrameTop", IH - D / 2, -ARCH_Z, IH - D / 2, ARCH_Z)
+		for _, s in ipairs({ -1, 1 }) do
+			local wz = s * (IW / 2 - D / 2)
+			frame("DD_FrameSide", 1.6, wz, ARCH_Y, wz)
+			for seg = 0, 2 do
+				local y0, z0 = archPoint(seg * 30, s, D / 2)
+				local y1, z1 = archPoint((seg + 1) * 30, s, D / 2)
+				frame("DD_FrameArch", y0, z0, y1, z1)
+			end
+			frame("DD_FrameFoot", 1.6, wz, 0.1, s * (IW / 2 - 1.5))
+		end
+	end
+	-- longitudinal stringers tying the frames together
+	for _, s in ipairs({ -1, 1 }) do
+		for _, y in ipairs({ 4.2, 8.6 }) do
+			ddPart(folder, "DD_Stringer", Vector3.new(IL, 0.35, 0.3), Vector3.new(cx, y, s * (IW / 2 - 0.15)), HULL.frame, Enum.Material.Metal).MaterialVariant = "MG-Rust 24"
+		end
+	end
+end
+
+-- one pipe running along X with bolted flanges at the given offsets
+local function pipeRun(folder, name, cx, y, z, diam, color, variant, flangeAt)
+	local p = ddCyl(folder, name, IL, diam, Vector3.new(cx, y, z), "X", color, Enum.Material.Metal)
+	p.CastShadow = true
+	if variant then p.MaterialVariant = variant end
+	for _, ox in ipairs(flangeAt) do
+		ddCyl(folder, "DD_Flange", 0.26, diam + 0.3, Vector3.new(cx + ox, y, z), "X", DD.dark, Enum.Material.Metal)
+	end
+	return p
+end
+
+local function paintBand(folder, cx, ox, y, z, diam, color)
+	ddCyl(folder, "DD_PipeBand", 0.9, diam + 0.04, Vector3.new(cx + ox, y, z), "X", color, Enum.Material.SmoothPlastic)
+end
+
+local function dressPipes(folder, i, cx)
+	local flip = (i % 2 == 0) and -1 or 1   -- rooms differ: bundle offset and paint codes alternate
+	local shift = (i % 3) * 2
+	-- +Z: the main bundle, under the arch
+	pipeRun(folder, "DD_PipeMain", cx, 14.5, 9.2, 0.8, HULL.pipeRust, "MG-Rust 14", { -18 + shift, -6 + shift, 6 + shift, 18 - shift })
+	pipeRun(folder, "DD_PipeB", cx, 14.65, 10.25, 0.5, HULL.pipeSteel, nil, { -12 + shift, 12 - shift })
+	pipeRun(folder, "DD_PipeC", cx, 13.85, 10.35, 0.36, HULL.pipeCopper, nil, { -8 - shift, 16 })
+	paintBand(folder, cx, -12 * flip, 14.5, 9.2, 0.8, (i % 3 == 0) and HULL.bandRed or HULL.bandYellow)
+	paintBand(folder, cx, 12 * flip, 14.5, 9.2, 0.8, (i % 3 == 0) and HULL.bandRed or HULL.bandYellow)
+	paintBand(folder, cx, 7 * flip, 14.65, 10.25, 0.5, HULL.bandBlue)
+	-- -Z: a second, thinner run against the arch
+	pipeRun(folder, "DD_PipeD", cx, 14.1, -10.4, 0.55, HULL.pipeNavy, nil, { -15, 3 + shift })
+	-- hangers from the frames
+	for _, ox in ipairs({ -15, -3, 9, 21 }) do
+		ddPart(folder, "DD_Hanger", Vector3.new(0.14, 0.95, 1.9), Vector3.new(cx + ox + 0.45, 15.05, 9.7), DD.dark, Enum.Material.Metal)
+	end
+	-- wall conduit + junction boxes
+	ddPart(folder, "DD_Conduit", Vector3.new(IL, 0.32, 0.32), Vector3.new(cx, 2.9, -IW / 2 + 0.5), DD.dark)
+	ddPart(folder, "DD_Conduit2", Vector3.new(IL, 0.22, 0.22), Vector3.new(cx, 3.35, -IW / 2 + 0.5), DD.dark)
+	for _, ox in ipairs({ -12 + shift, 6 + shift }) do
+		ddPart(folder, "DD_JunctionBox", Vector3.new(1.4, 1.5, 0.45), Vector3.new(cx + ox, 3.2, -IW / 2 + 0.55), HULL.tray, Enum.Material.Metal)
+		ddCyl(folder, "DD_Riser", 8.6, 0.2, Vector3.new(cx + ox + 0.35, 8.3, -IW / 2 + 0.4), "Y", DD.dark, Enum.Material.Metal)
+	end
+	-- valve teed off the main run: drop pipe, elbow, valve body, spoked wheel
+	local vx = cx + ((i == 8) and -7.5 or -6) -- (§8: clear of the flywheel)
+	ddCyl(folder, "DD_ValveDrop", 8.6, 0.42, Vector3.new(vx, 9.8, 10.6), "Y", HULL.pipeRust, Enum.Material.Metal).MaterialVariant = "MG-Rust 14"
+	ddPart(folder, "DD_ValveElbow", Vector3.new(0.62, 0.62, 0.62), Vector3.new(vx, 14.2, 10.2), HULL.pipeRust, Enum.Material.Metal, Enum.PartType.Ball)
+	ddCyl(folder, "DD_Valve", 1.1, 0.7, Vector3.new(vx, 5.4, 10.6), "Y", HULL.bandRed, Enum.Material.Metal)
+	ddCyl(folder, "DD_ValveStem", 0.9, 0.14, Vector3.new(vx, 5.4, 9.85), "Z", DD.dark, Enum.Material.Metal)
+	local wheel = Vector3.new(vx, 5.4, 9.42)
+	ddCyl(folder, "DD_ValveHub", 0.18, 0.34, wheel, "Z", DD.dark, Enum.Material.Metal)
+	for k = 0, 7 do -- rim (octagon) + spokes
+		local a = math.rad(k * 45)
+		local rim = wheel + Vector3.new(math.cos(a) * 0.82, math.sin(a) * 0.82, 0)
+		local seg = ddPart(folder, "DD_ValveRim", Vector3.new(0.7, 0.13, 0.13), rim, HULL.bandRed, Enum.Material.Metal)
+		seg.CFrame = CFrame.new(rim) * CFrame.Angles(0, 0, a + math.rad(90))
+		if k % 2 == 0 then
+			local spoke = ddPart(folder, "DD_ValveSpoke", Vector3.new(0.8, 0.09, 0.09), wheel + Vector3.new(math.cos(a) * 0.4, math.sin(a) * 0.4, 0), DD.dark, Enum.Material.Metal)
+			spoke.CFrame = CFrame.new(wheel + Vector3.new(math.cos(a) * 0.4, math.sin(a) * 0.4, 0)) * CFrame.Angles(0, 0, a)
+		end
+	end
+	-- gauge on the bulkhead-side run of the wall
+	local g = Vector3.new(cx + ((i == 3) and 16 or 6), 6.2, IW / 2 - 0.35) -- (§3: clear of the notice board)
+	ddCyl(folder, "DD_Gauge", 0.3, 1.4, g, "Z", DD.dark, Enum.Material.Metal)
+	ddCyl(folder, "DD_GaugeFace", 0.05, 1.15, g - Vector3.new(0, 0, 0.17), "Z", Color3.fromRGB(176, 170, 150), Enum.Material.SmoothPlastic)
+	local nx = ddPart(folder, "DD_GaugeNeedle", Vector3.new(0.5, 0.05, 0.03), g + Vector3.new(0.12, 0.12, -0.21), HULL.bandRed, Enum.Material.SmoothPlastic)
+	nx.Orientation = Vector3.new(0, 0, 38 + i * 11)
+	ddNeon(folder, "DD_GaugeLED", g + Vector3.new(1.1, 0.4, -0.05), Color3.fromRGB(60, 220, 90), Vector3.new(0.24, 0.24, 0.18))
+end
+
+-- cable tray on the -Z arch: open tray, cable loom inside, and loose cables sagging
+-- out of it between the frames (Beams, so the sag is a real curve at almost no cost)
+local function dressCableTray(folder, i, cx)
+	local y, z = 14.95, -8.1
+	ddPart(folder, "DD_TrayBase", Vector3.new(IL, 0.08, 1.5), Vector3.new(cx, y, z), HULL.tray, Enum.Material.Metal)
+	for _, s in ipairs({ -1, 1 }) do
+		ddPart(folder, "DD_TrayRail", Vector3.new(IL, 0.32, 0.07), Vector3.new(cx, y + 0.13, z + s * 0.72), HULL.tray, Enum.Material.Metal)
+	end
+	for k, off in ipairs({ -0.42, -0.1, 0.24, 0.5 }) do
+		ddCyl(folder, "DD_Loom", IL, 0.13 + (k % 2) * 0.05, Vector3.new(cx, y + 0.13, z + off), "X", HULL.cable, Enum.Material.Rubber)
+	end
+	-- sagging loops
+	local anchor = ddPart(folder, "DD_CableAnchor", Vector3.new(0.2, 0.2, 0.2), Vector3.new(cx, y, z + 0.8), HULL.cable, Enum.Material.Rubber)
+	anchor.Transparency = 1
+	local loops = { { -19, -13, 1.4 }, { -7, -1, 2.2 }, { 5, 9, 1.2 }, { 11, 19, 2.8 } }
+	for idx, l in ipairs(loops) do
+		if (idx + i) % 4 ~= 0 then -- each room drops a different subset
+			local a0 = Instance.new("Attachment") ; a0.Name = "DD_CableA" ; a0.Parent = anchor ; a0.WorldPosition = Vector3.new(cx + l[1], y, z + 0.8)
+			local a1 = Instance.new("Attachment") ; a1.Name = "DD_CableB" ; a1.Parent = anchor ; a1.WorldPosition = Vector3.new(cx + l[2], y, z + 0.8)
+			local beam = Instance.new("Beam")
+			beam.Name = "DD_CableSag" ; beam.Attachment0 = a0 ; beam.Attachment1 = a1
+			beam.Color = ColorSequence.new(HULL.cable) ; beam.Width0 = 0.11 ; beam.Width1 = 0.11
+			beam.FaceCamera = true ; beam.Segments = 12 ; beam.LightInfluence = 1 ; beam.Transparency = NumberSequence.new(0)
+			-- a beam's curve leaves along each attachment's Axis: point both down so it sags
+			a0.Axis = Vector3.new(0, -1, 0) ; a0.SecondaryAxis = Vector3.new(1, 0, 0)
+			a1.Axis = Vector3.new(0, -1, 0) ; a1.SecondaryAxis = Vector3.new(1, 0, 0)
+			beam.CurveSize0 = l[3] * 0.9 ; beam.CurveSize1 = -l[3] * 0.9
+			beam.Parent = anchor
+		end
+	end
+end
+
+-- generic industrial dressing for a normal (non-tower) hull section
+local function dressIndustrial(folder, cx, i)
+	dressArch(folder, cx, "MG-Rust 24")
+	dressFrames(folder, cx)
+	dressPipes(folder, i, cx)
+	dressCableTray(folder, i, cx)
 end
 
 local function dressConsole(folder, model, partName, ledColor)
@@ -775,11 +950,14 @@ end
 
 local function dressSonarRadio(folder, model, cx)
 	local sideW = (IW - DW) / 2
-	ddPart(folder, "DD_PartZneg", Vector3.new(0.6, IH - 0.5, sideW), Vector3.new(cx, (IH - 0.5) / 2, -(DW / 2) - sideW / 2), DD.dark, Enum.Material.CorrodedMetal)
-	ddPart(folder, "DD_PartZpos", Vector3.new(0.6, IH - 0.5, sideW), Vector3.new(cx, (IH - 0.5) / 2, (DW / 2) + sideW / 2), DD.dark, Enum.Material.CorrodedMetal)
-	ddPart(folder, "DD_PartTop", Vector3.new(0.6, IH - DH, DW), Vector3.new(cx, DH + (IH - DH) / 2, 0), DD.dark, Enum.Material.CorrodedMetal)
+	-- the sonar/radio partition is riveted rust plate (a CorrodedMetal variant)
+	local function plate(p: BasePart) p.MaterialVariant = "deepdescent_hull_rust" ; p.Color = Color3.fromRGB(100, 96, 92) end
+	plate(ddPart(folder, "DD_PartZneg", Vector3.new(0.6, IH - 0.5, sideW), Vector3.new(cx, (IH - 0.5) / 2, -(DW / 2) - sideW / 2), DD.dark, Enum.Material.CorrodedMetal))
+	plate(ddPart(folder, "DD_PartZpos", Vector3.new(0.6, IH - 0.5, sideW), Vector3.new(cx, (IH - 0.5) / 2, (DW / 2) + sideW / 2), DD.dark, Enum.Material.CorrodedMetal))
+	plate(ddPart(folder, "DD_PartTop", Vector3.new(0.6, IH - DH, DW), Vector3.new(cx, DH + (IH - DH) / 2, 0), DD.dark, Enum.Material.CorrodedMetal))
 	local fix = ddPart(folder, "DD_RadioFixture", Vector3.new(2, 0.5, 2), Vector3.new(cx + 12, IH - 0.6, 0), Color3.fromRGB(120, 20, 20), Enum.Material.Neon)
-	local pl = Instance.new("PointLight") ; pl.Color = Color3.fromRGB(255, 45, 28) ; pl.Brightness = 1.6 ; pl.Range = 34 ; pl:SetAttribute("BaseBrightness", 1.6) ; pl.Shadows = true ; pl.Parent = fix
+	-- radio half: a dimmer, shadowless lamp (the sonar half's hero lantern casts the room's shadows)
+	local pl = Instance.new("PointLight") ; pl.Color = Color3.fromRGB(255, 45, 28) ; pl.Brightness = 0.9 ; pl.Range = 20 ; pl:SetAttribute("BaseBrightness", 0.9) ; pl.Shadows = false ; pl.Parent = fix
 	CollectionService:AddTag(fix, "EmergencyLight")
 	fix:SetAttribute("Section", 6)
 end
@@ -879,8 +1057,11 @@ local function dressBreach(folder, model, cx)
 		tooth("DD_EdgeL" .. i, Vector3.new(rimX, y, b.Z - halfZ), Vector3.new(40, 0, 0))
 		tooth("DD_EdgeR" .. i, Vector3.new(rimX, y, b.Z + halfZ), Vector3.new(-40, 0, 0))
 	end
-	local la = ddPart(folder, "DD_BreachLightAnchor", Vector3.new(0.5, 0.5, 0.5), b + Vector3.new(-1.5, 0, 0), Color3.fromRGB(40, 80, 120), Enum.Material.Neon)
-	local pl = Instance.new("PointLight") ; pl.Color = Color3.fromRGB(70, 120, 190) ; pl.Brightness = 1.5 ; pl.Range = 18 ; pl.Shadows = true ; pl.Parent = la
+	-- cold teal glow from the open sea: the stern half's light (and a shadow caster) against
+	-- the bow half's red lantern
+	-- (raised above the start waterline -- under the water volume it lit almost nothing)
+	local la = ddPart(folder, "DD_BreachLightAnchor", Vector3.new(0.5, 0.5, 0.5), b + Vector3.new(-4, 5, 0), Color3.fromRGB(40, 110, 130), Enum.Material.Neon)
+	local pl = Instance.new("PointLight") ; pl.Color = Color3.fromRGB(60, 150, 170) ; pl.Brightness = 2.2 ; pl.Range = 26 ; pl.Shadows = true ; pl.Parent = la
 	local spray = Instance.new("ParticleEmitter")
 	spray.Name = "DD_Spray" ; spray.Texture = "rbxasset://textures/particles/smoke_main.dds" ; spray.Color = ColorSequence.new(Color3.fromRGB(140, 170, 190)) ; spray.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.4), NumberSequenceKeypoint.new(1, 1) }) ; spray.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 3) }) ; spray.Lifetime = NumberRange.new(0.8, 1.4) ; spray.Rate = 14 ; spray.Speed = NumberRange.new(8, 14) ; spray.SpreadAngle = Vector2.new(25, 25) ; spray.Acceleration = Vector3.new(-12, -6, 0) ; spray.Parent = br
 	local bub = Instance.new("ParticleEmitter")
@@ -1227,7 +1408,7 @@ local function dressSurvivorsWall()
 	wall.Name = "DD_SurvivorsWall"
 	wall.Anchored = true; wall.CanCollide = false; wall.CastShadow = false
 	wall.Size = Vector3.new(9, 5.5, 0.3)
-	wall.CFrame = CFrame.new(-23.8, 8, 0) * CFrame.Angles(0, math.rad(-90), 0)   -- bow wall opposite the aft door (interior face x=-24), centered z=0 above the torpedo tubes; Front face -> +X into the room
+	wall.CFrame = CFrame.new(-23.8, 10.9, 0) * CFrame.Angles(0, math.rad(-90), 0)   -- bow wall opposite the aft door (interior face x=-24), centered z=0 clear above the tube lids and their lamps (y 6.9); Front face -> +X into the room
 	wall.Color = Color3.fromRGB(20, 24, 30); wall.Material = Enum.Material.Metal
 	wall.Parent = model
 	tag(wall, "SurvivorsWall")
@@ -1259,6 +1440,1109 @@ local function dressSurvivorsWall()
 	lp.Parent = wall
 end
 
+-- ============================================================================
+-- Hull surfaces (visual batch 2a)
+-- Every room had the same blue-flecked MG-Rust 30 on its walls, and the floors put
+-- the DiamondPlate-based "deepdescent_floor_grate" variant on CorrodedMetal parts,
+-- so it never rendered (a MaterialVariant only applies on its own base material).
+-- Each room now gets its own wall finish from the MG-Rust pack, riveted bulkheads,
+-- dark steel ceilings and real tread-plate floors; the connectors match.
+-- ============================================================================
+local WALL_FINISH = {
+	[1] = "MG-Rust 24", -- dark steel, rust streaks
+	[2] = "MG-Rust 32", -- navy paint over rust (crew quarters)
+	[3] = "MG-Rust 15", -- cream galley paint, peeling
+	[4] = "MG-Rust 18", -- cream officers' paint, peeling
+	[5] = "MG-Rust 28", -- blue-grey control-room paint
+	[6] = "MG-Rust 29", -- slate
+	[7] = "MG-Rust 24",
+	[8] = "MG-Rust 14", -- rust running down the walls
+	[9] = "MG-Rust 05", -- dark rust with teal growth (the flooded stern)
+}
+local SURF = {
+	wall = Color3.fromRGB(72, 72, 74),
+	wallPainted = Color3.fromRGB(64, 62, 60),  -- the cream rooms read too bright otherwise
+	bulkhead = Color3.fromRGB(110, 104, 100),
+	ceiling = Color3.fromRGB(44, 46, 50),
+	floor = Color3.fromRGB(58, 60, 62),
+}
+
+local function finish(p: BasePart, mat: Enum.Material, variant: string, color: Color3)
+	p.Material = mat ; p.MaterialVariant = variant ; p.Color = color
+end
+
+local function dressSurfaces(model: Instance, i: number)
+	local wallCol = (i == 3 or i == 4) and SURF.wallPainted or SURF.wall
+	for _, p in ipairs(model:GetChildren()) do
+		if p:IsA("BasePart") then
+			local n = p.Name
+			if n == "WallZpos" or n == "WallZneg" or n:match("^TowerWall") or n:match("^CaptainWall") then
+				finish(p, Enum.Material.Metal, WALL_FINISH[i], wallCol)
+			elseif n:match("^EndWall") or n:match("^SternCap") then
+				finish(p, Enum.Material.CorrodedMetal, "deepdescent_hull_rust1", SURF.bulkhead)
+			elseif n == "Ceiling" or n == "TowerCeil" then
+				finish(p, Enum.Material.Metal, "MG-Rust 24", SURF.ceiling)
+			elseif n == "Floor" or n == "TowerFloor" then
+				finish(p, Enum.Material.DiamondPlate, "deepdescent_floor_grate", SURF.floor)
+			end
+		end
+	end
+end
+
+local function dressConnectorSurfaces()
+	for _, c in ipairs(root:GetChildren()) do
+		if c.Name:match("^Connector_") then
+			for _, p in ipairs(c:GetChildren()) do
+				if p:IsA("BasePart") then
+					if p.Name:match("^CorrWall") then
+						finish(p, Enum.Material.CorrodedMetal, "deepdescent_hull_rust1", SURF.bulkhead)
+					elseif p.Name == "CorrCeil" then
+						finish(p, Enum.Material.Metal, "MG-Rust 24", SURF.ceiling)
+					elseif p.Name == "CorrFloor" then
+						finish(p, Enum.Material.DiamondPlate, "deepdescent_floor_grate", SURF.floor)
+					end
+				end
+			end
+		end
+	end
+end
+
+-- ============================================================================
+-- Emergency lighting design (visual batch 1b)
+-- Each room gets ONE off-centre "hero" battle lantern on a side wall -- the room's
+-- only shadow-casting light -- plus a dim bounce fill and a few small shadowless
+-- practicals in that room's own colour, so rooms read as pools of light and
+-- silhouettes instead of one flat red wash. The baked EmergencyFixture is MOVED onto
+-- the wall and becomes the lantern's lens: it stays the tagged part, so PowerManager's
+-- flicker / MainGlow and PolishManager's sparks keep working. Positions derive from
+-- the section centre (absolute), so re-running Dress never drifts.
+-- ============================================================================
+local LENS_ON = Color3.fromRGB(255, 52, 30)
+local DOOR_LAMP = Color3.fromRGB(170, 30, 18)
+-- x = offset from the section centre, side = wall (+1 = +Z, -1 = -Z),
+-- calm = flicker-interval multiplier (>1 steadier, <1 twitchier)
+local HERO_LAMP = {
+	[1] = { x = -13, side = 1, calm = 1.6 },  -- over the escape pod + torpedo tubes
+	[2] = { x = 4, side = -1, calm = 1.0 },   -- across the bunks
+	[3] = { x = -14, side = 1, calm = 0.6 },  -- over the mess tables; a sick, twitchy lamp
+	[4] = { x = -4, side = 1, calm = 1.2 },   -- facing the captain's door
+	[5] = { x = 14, side = -1, calm = 1.4 },  -- pools on the ballast panel + valve plate
+	[6] = { x = -4, side = -1, calm = 1.0 },  -- grazes the sonar/radio partition (radio half keeps its own dim lamp)
+	[8] = { x = 4, side = -1, calm = 0.5 },   -- over the walkway; the engine room's lamp is dying
+	[9] = { x = 6, side = 1, calm = 1.0 },    -- across the water onto the torpedoes; the stern glows cold from the breach
+}
+
+-- Re-dress a tagged emergency fixture as a caged wall lantern. wallPos is a point on
+-- the wall face, inward the unit normal into the room. bounce > 0 adds a dim
+-- shadowless fill out in the room (fake bounce off the lit floor); PowerManager
+-- flickers the lens, the light cone and the bounce together with the bulb.
+local function dressLantern(folder: Instance, fixture: BasePart, wallPos: Vector3, inward: Vector3, bounce: number)
+	local light = fixture:FindFirstChildOfClass("PointLight")
+	local up = Vector3.new(0, 1, 0)
+	local c = wallPos + inward * 1.05
+	local f = fixture :: Part
+	f.Shape = Enum.PartType.Cylinder
+	f.Size = Vector3.new(1.1, 0.85, 0.85)
+	f.CFrame = CFrame.new(c) * CFrame.Angles(0, 0, math.rad(90))
+	f.Material = Enum.Material.Neon
+	f.Color = LENS_ON
+	f.CastShadow = false
+	f:SetAttribute("LensColor", LENS_ON)
+	-- cap, base, four cage bars, wall plate + arm
+	ddCyl(folder, "DD_LanternCap", 0.35, 1.25, c + up * 0.72, "Y", DD.dark)
+	ddCyl(folder, "DD_LanternBase", 0.3, 1.1, c - up * 0.7, "Y", DD.dark)
+	local tangent = inward:Cross(up)
+	for k = 0, 3 do
+		local a = math.rad(45 + k * 90)
+		ddPart(folder, "DD_LanternBar", Vector3.new(0.09, 1.3, 0.09), c + (inward * math.cos(a) + tangent * math.sin(a)) * 0.55, DD.dark)
+	end
+	local plate = ddPart(folder, "DD_LanternPlate", Vector3.new(1, 1.9, 0.14), wallPos, DD.dark)
+	plate.CFrame = CFrame.lookAt(wallPos + inward * 0.07, wallPos + inward * 2)
+	local armPos = wallPos + inward * 0.55 + up * 0.72
+	local arm = ddPart(folder, "DD_LanternArm", Vector3.new(0.28, 0.28, 1.1), armPos, DD.dark)
+	arm.CFrame = CFrame.lookAt(armPos, armPos + inward)
+	-- faint camera-facing light cone falling from the lens onto the floor
+	local a0 = Instance.new("Attachment") ; a0.Name = "DD_ConeA0" ; a0.Parent = f ; a0.WorldPosition = c - up * 0.45
+	local a1 = Instance.new("Attachment") ; a1.Name = "DD_ConeA1" ; a1.Parent = f ; a1.WorldPosition = Vector3.new(c.X, 0.8, c.Z) + inward * 4.5
+	local beam = Instance.new("Beam")
+	beam.Name = "DD_LightCone" ; beam.Attachment0 = a0 ; beam.Attachment1 = a1
+	beam.Color = ColorSequence.new(light and light.Color or LENS_ON)
+	beam.LightEmission = 1 ; beam.LightInfluence = 0 ; beam.FaceCamera = true ; beam.Segments = 1
+	beam.Width0 = 0.9 ; beam.Width1 = 10
+	beam.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.82), NumberSequenceKeypoint.new(0.45, 0.94), NumberSequenceKeypoint.new(1, 1) })
+	beam.Parent = f
+	if bounce > 0 then
+		local att = Instance.new("Attachment") ; att.Name = "DD_BounceAtt" ; att.Parent = f
+		att.WorldPosition = Vector3.new(c.X, 2.5, c.Z) + inward * 7
+		local bl = Instance.new("PointLight")
+		bl.Name = "DD_Bounce" ; bl.Color = Color3.fromRGB(190, 38, 24) ; bl.Brightness = bounce ; bl.Range = 30 ; bl.Shadows = false
+		bl:SetAttribute("BaseBrightness", bounce)
+		bl.Parent = att
+	end
+end
+
+-- small shadowless practical: a neon lens with its own short-range light
+local function practical(folder: Instance, name: string, pos: Vector3, color: Color3, brightness: number, range: number, size: Vector3, shape: Enum.PartType?)
+	local lens = ddNeon(folder, name, pos, color, size)
+	if shape then lens.Shape = shape end
+	local pl = Instance.new("PointLight") ; pl.Color = color ; pl.Brightness = brightness ; pl.Range = range ; pl.Shadows = false ; pl.Parent = lens
+	return lens
+end
+
+-- light an existing part (a console screen, the generator panel) as a glowing practical
+local function glowFrom(part: Instance?, color: Color3, brightness: number, range: number)
+	if not (part and part:IsA("BasePart")) then return end
+	local pl = Instance.new("PointLight") ; pl.Color = color ; pl.Brightness = brightness ; pl.Range = range ; pl.Shadows = false ; pl.Parent = part
+end
+
+local function dressEmergencyLighting(folder: Instance, model: Instance, i: number, cx: number)
+	local fixture = model:FindFirstChild("EmergencyFixture")
+	if not (fixture and fixture:IsA("BasePart")) then return end
+	local light = fixture:FindFirstChildOfClass("PointLight")
+	if not light then return end
+	if i == 7 then
+		-- the tower's lamp sat at §5's ceiling (lighting §5 twice, leaving the tower black):
+		-- hang it inside the tower instead, small and shadowless
+		light.Brightness = 1.4 ; light.Range = 16 ; light.Shadows = false ; light:SetAttribute("BaseBrightness", 1.4)
+		dressLantern(folder, fixture, Vector3.new(cx + 4, 29, -1.5), Vector3.new(-1, 0, 0), 0)
+		fixture:SetAttribute("FlickerCalm", 1.5)
+		return
+	end
+	local h = HERO_LAMP[i]
+	if not h then return end
+	light.Brightness = 3 ; light.Range = 38 ; light.Shadows = true ; light:SetAttribute("BaseBrightness", 3)
+	dressLantern(folder, fixture, Vector3.new(cx + h.x, 11.5, h.side * IW / 2), Vector3.new(0, 0, -h.side), 1.0)
+	fixture:SetAttribute("FlickerCalm", h.calm)
+	-- dim red lamp strip over each doorway (reads even at the lowest graphics quality)
+	local slot = hullSlot[i]
+	for _, dir in ipairs({ -1, 1 }) do
+		if (dir == -1 and slot > 0) or (dir == 1 and slot < LAST_SLOT) then
+			ddNeon(folder, "DD_DoorLamp", Vector3.new(cx + dir * (IL / 2 - 0.12), DH + 1.5, 0), DOOR_LAMP, Vector3.new(0.2, 0.3, 3.4))
+		end
+	end
+	-- room practicals
+	if i == 1 then
+		practical(folder, "DD_PodLamp", Vector3.new(cx - 19, 7.3, 8), Color3.fromRGB(255, 140, 50), 1.4, 9, Vector3.new(0.6, 0.6, 0.6), Enum.PartType.Ball)
+		for t = 0, 3 do  -- tube status lamps on the bow wall; tube 3 reads "ready"
+			ddNeon(folder, "DD_TubeLamp", Vector3.new(cx - IL / 2 + 0.12, 5.2, -9 + t * 6), (t == 2) and Color3.fromRGB(255, 150, 40) or Color3.fromRGB(150, 24, 16), Vector3.new(0.2, 0.35, 0.8))
+		end
+	elseif i == 2 then
+		practical(folder, "DD_BunkLamp", Vector3.new(cx - 14, 4.3, IW / 2 - 0.5), Color3.fromRGB(255, 170, 90), 0.9, 7, Vector3.new(0.4, 0.4, 0.4), Enum.PartType.Ball)
+	elseif i == 3 then
+		-- the stove's pilot light still burns under the pot
+		local ring = ddCyl(folder, "DD_StoveRing", 0.08, 1.5, Vector3.new(cx, 3.3, -IW / 2 + 3), "Y", Color3.fromRGB(255, 110, 30), Enum.Material.Neon)
+		glowFrom(ring, Color3.fromRGB(255, 120, 40), 1.2, 8)
+	elseif i == 4 then
+		local cap = model:FindFirstChild("CaptainLight")
+		local cl = cap and cap:FindFirstChildOfClass("PointLight")
+		if cl then cl.Shadows = false end
+	elseif i == 5 then
+		local nav = folder:FindFirstChild("DD_Screen_NavConsole")
+		if nav and nav:IsA("BasePart") then nav.Material = Enum.Material.Neon ; nav.Color = Color3.fromRGB(16, 60, 38) end
+		glowFrom(nav, Color3.fromRGB(70, 210, 120), 0.8, 8)
+		local helm = folder:FindFirstChild("DD_Screen_Helm")
+		if helm and helm:IsA("BasePart") then helm.Material = Enum.Material.Neon ; helm.Color = Color3.fromRGB(14, 46, 34) end
+		practical(folder, "DD_BallastLamp", Vector3.new(cx + 12, 4.75, -IW / 2 + 2.45), Color3.fromRGB(255, 150, 60), 0.7, 6, Vector3.new(0.3, 0.3, 0.2))
+	elseif i == 6 then
+		-- the sonar still runs on emergency power: its screen glows green
+		local sonar = folder:FindFirstChild("DD_Screen_SonarConsole")
+		if sonar and sonar:IsA("BasePart") then sonar.Material = Enum.Material.Neon ; sonar.Color = Color3.fromRGB(20, 80, 44) end
+		glowFrom(sonar, Color3.fromRGB(60, 220, 120), 1.1, 10)
+	elseif i == 8 then
+		glowFrom(folder:FindFirstChild("DD_GPanel"), Color3.fromRGB(255, 150, 60), 1.0, 9)
+	end
+end
+
+-- ============================================================================
+-- Main-power work lamps (visual batch 1c)
+-- Each tagged MainFixture becomes a caged tungsten pendant: a stem from the ceiling,
+-- a dark housing (the tagged part, still holding its downward SpotLight) and a
+-- DD_Bulb that PowerManager lights. The +Z lamp of each room casts the shadows while
+-- the generator runs (MainShadows attr) and carries a warm ceiling-bounce fill
+-- (DD_MainFillAtt). §6's lamps step off the sonar/radio partition line.
+-- ============================================================================
+local function dressMainLamps(folder: Instance, model: Instance, i: number, cx: number)
+	for _, fixture in ipairs(model:GetChildren()) do
+		if fixture.Name == "MainFixture" and fixture:IsA("BasePart") and CollectionService:HasTag(fixture, "MainLight") then
+			local zSide = (fixture.Position.Z >= 0) and 1 or -1
+			local x = (i == 6) and (cx - zSide * 7) or cx   -- §6: sonar half (+Z) / radio half (-Z)
+			local z = zSide * IW / 4
+			local housingY = IH - 1.9
+			local f = fixture :: Part
+			f.Size = Vector3.new(1.5, 0.5, 1.5)
+			f.CFrame = CFrame.new(x, housingY, z)
+			f.Color = DD.dark
+			f.Material = Enum.Material.Metal
+			f.CastShadow = false
+			f.CanCollide = false
+			local light = f:FindFirstChildOfClass("SpotLight")
+			if light then
+				light.Face = Enum.NormalId.Bottom ; light.Angle = 105 ; light.Range = 30
+				light.Shadows = false ; light.Enabled = false ; light.Brightness = 0
+			end
+			ddCyl(folder, "DD_LampStem", IH - housingY - 0.25, 0.14, Vector3.new(x, (IH + housingY + 0.25) / 2, z), "Y", DD.dark)
+			-- the bulb hangs under the housing inside a four-bar cage; parented to the fixture
+			-- so PowerManager finds it (dark glass until the generator runs)
+			ddPart(f, "DD_Bulb", Vector3.new(0.6, 0.6, 0.6), Vector3.new(x, housingY - 0.55, z), Color3.fromRGB(58, 50, 42), Enum.Material.Glass, Enum.PartType.Ball)
+			for k = 0, 3 do
+				local a = math.rad(45 + k * 90)
+				ddPart(folder, "DD_LampCage", Vector3.new(0.07, 0.75, 0.07), Vector3.new(x + math.cos(a) * 0.42, housingY - 0.6, z + math.sin(a) * 0.42), DD.dark)
+			end
+			if zSide > 0 then
+				f:SetAttribute("MainShadows", true)
+				local att = Instance.new("Attachment") ; att.Name = "DD_MainFillAtt" ; att.Parent = f
+				att.WorldPosition = Vector3.new(x, IH - 3, 0)
+				local fill = Instance.new("PointLight")
+				fill.Name = "MainFill" ; fill.Range = 34 ; fill.Shadows = false ; fill.Enabled = false ; fill.Brightness = 0
+				fill.Parent = att
+			end
+		end
+	end
+end
+
+-- ============================================================================
+-- Bulkhead doors + door frames (visual batch 3c)
+-- The tagged BulkheadDoor stays as the invisible logic part (collision + prompts).
+-- What you see is DD_DoorLeaf, a steel leaf welded to its stiffeners, dogs and hatch
+-- wheel; WaterRenderer (client) slides it into the corridor wall on the Open attr.
+-- ============================================================================
+local DOOR = {
+	leaf = Color3.fromRGB(112, 114, 104),
+	leafSealed = Color3.fromRGB(96, 50, 40),
+	bar = Color3.fromRGB(58, 60, 60),
+	frame = Color3.fromRGB(150, 138, 110),
+	seal = Color3.fromRGB(150, 36, 26),
+}
+
+local function leafPart(leaf: BasePart, name: string, size: Vector3, offset: CFrame, color: Color3, material: Enum.Material?, shape: Enum.PartType?)
+	local cf = leaf.CFrame * offset
+	local p = ddPart(leaf, name, size, cf.Position, color, material, shape)
+	p.CFrame = cf
+	p.Anchored = false
+	local w = Instance.new("WeldConstraint")
+	w.Part0 = leaf ; w.Part1 = p ; w.Parent = p
+	return p
+end
+
+local function dressDoorFace(leaf: BasePart, fx: number)
+	local t = leaf.Size.X / 2
+	local h, w = leaf.Size.Y / 2, leaf.Size.Z / 2
+	local f = t + 0.05
+	-- gasket round the edge
+	leafPart(leaf, "DD_DrGasket", Vector3.new(0.1, 0.26, w * 2), CFrame.new(fx * f, h - 0.13, 0), DOOR.bar)
+	leafPart(leaf, "DD_DrGasket", Vector3.new(0.1, 0.26, w * 2), CFrame.new(fx * f, -h + 0.13, 0), DOOR.bar)
+	leafPart(leaf, "DD_DrGasket", Vector3.new(0.1, h * 2, 0.26), CFrame.new(fx * f, 0, w - 0.13), DOOR.bar)
+	leafPart(leaf, "DD_DrGasket", Vector3.new(0.1, h * 2, 0.26), CFrame.new(fx * f, 0, -w + 0.13), DOOR.bar)
+	-- stiffeners + dogs
+	for _, y in ipairs({ -3.1, 3.1 }) do
+		leafPart(leaf, "DD_DrBar", Vector3.new(0.14, 0.55, w * 2 - 1), CFrame.new(fx * (t + 0.07), y, 0), DOOR.bar).MaterialVariant = "MG-Rust 24"
+		for _, s in ipairs({ -1, 1 }) do
+			leafPart(leaf, "DD_DrDog", Vector3.new(0.26, 0.72, 0.34), CFrame.new(fx * (t + 0.13), y, s * (w - 0.3)), HULL.pipeSteel)
+		end
+	end
+	-- hatch wheel
+	local R, wx = 1.32, fx * (t + 0.44)
+	leafPart(leaf, "DD_DrStem", Vector3.new(0.46, 0.34, 0.34), CFrame.new(fx * (t + 0.23), 0.2, 0), DOOR.bar, Enum.Material.Metal, Enum.PartType.Cylinder)
+	leafPart(leaf, "DD_DrHub", Vector3.new(0.16, 0.6, 0.6), CFrame.new(wx, 0.2, 0), HULL.bandRed, Enum.Material.Metal, Enum.PartType.Cylinder)
+	for k = 0, 7 do
+		local a = math.rad(k * 45)
+		leafPart(leaf, "DD_DrRim", Vector3.new(0.15, 0.17, 1.12), CFrame.new(wx, 0.2 + math.cos(a) * R, math.sin(a) * R) * CFrame.Angles(a, 0, 0), HULL.bandRed)
+	end
+	for _, deg in ipairs({ 45, 135 }) do
+		leafPart(leaf, "DD_DrSpoke", Vector3.new(0.1, 0.13, R * 2), CFrame.new(wx, 0.2, 0) * CFrame.Angles(math.rad(deg), 0, 0), HULL.bandRed)
+	end
+	-- welded-shut bars, shown only once the door is sealed
+	for _, deg in ipairs({ 40, -40 }) do
+		local bar = leafPart(leaf, "DD_SealBar", Vector3.new(0.16, 0.5, w * 2.3), CFrame.new(fx * (t + 0.72), 0, 0) * CFrame.Angles(math.rad(deg), 0, 0), DOOR.seal)
+		bar.Transparency = 1
+	end
+end
+
+local function dressBulkheadDoors()
+	for _, door in ipairs(CollectionService:GetTagged("BulkheadDoor")) do
+		if door:IsA("BasePart") and door:IsDescendantOf(root) then
+			door.Transparency = 1
+			local leaf = ddPart(door, "DD_DoorLeaf", Vector3.new(0.7, DH - 0.06, DW - 0.04), door.Position, DOOR.leaf, Enum.Material.Metal)
+			leaf.MaterialVariant = "MG-Rust 06"
+			dressDoorFace(leaf, -1)
+			dressDoorFace(leaf, 1)
+			local num = 0
+			for k, sec in ipairs(SectionData.HullOrder) do
+				if sec == door:GetAttribute("SectionA") then num = k end
+			end
+			for _, face in ipairs({ Enum.NormalId.Left, Enum.NormalId.Right }) do
+				local sg = Instance.new("SurfaceGui")
+				sg.Name = "DD_DoorStencil" ; sg.Face = face
+				sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud ; sg.PixelsPerStud = 20
+				sg.LightInfluence = 1 ; sg.Parent = leaf
+				local tl = Instance.new("TextLabel")
+				tl.BackgroundTransparency = 1 ; tl.AnchorPoint = Vector2.new(0.5, 0)
+				tl.Position = UDim2.fromScale(0.5, 0.08) ; tl.Size = UDim2.fromScale(0.5, 0.11)
+				tl.Font = Enum.Font.Oswald ; tl.TextScaled = true ; tl.Text = ("WTD %d"):format(num)
+				tl.TextColor3 = Color3.fromRGB(196, 190, 170) ; tl.TextTransparency = 0.3 ; tl.Parent = sg
+			end
+			local function syncSeal()
+				local sealed = door:GetAttribute("Sealed") == true
+				leaf.Color = sealed and DOOR.leafSealed or DOOR.leaf
+				for _, c in ipairs(leaf:GetChildren()) do
+					if c.Name == "DD_SealBar" and c:IsA("BasePart") then c.Transparency = sealed and 0 or 1 end
+				end
+			end
+			door:GetAttributeChangedSignal("Sealed"):Connect(syncSeal)
+			syncSeal()
+		end
+	end
+	-- corridor: the tracks the leaf runs in + a dim red lens either side
+	for _, c in ipairs(root:GetChildren()) do
+		local door = c.Name:match("^Connector_") and c:FindFirstChild("BulkheadDoor")
+		if door and door:IsA("BasePart") then
+			local f = door:FindFirstChild("DD_DoorLeaf")
+			local x = door.Position.X
+			for _, sx in ipairs({ -1, 1 }) do
+				for _, sz in ipairs({ -1, 1 }) do
+					ddPart(f, "DD_DoorRail", Vector3.new(0.22, DH, 0.5), Vector3.new(x + sx * 0.5, DH / 2, sz * (DW / 2 - 0.2)), DOOR.bar).Anchored = true
+				end
+				ddPart(f, "DD_DoorTrack", Vector3.new(0.22, 0.45, DW), Vector3.new(x + sx * 0.5, DH - 0.22, 0), DOOR.bar)
+				ddNeon(f, "DD_CorrLens", Vector3.new(x + sx * 2.3, DH - 0.08, 0), DOOR_LAMP, Vector3.new(1.3, 0.12, 0.5))
+			end
+		end
+	end
+end
+
+-- diagonal black/yellow bands: one Frame + a UIGradient with hard colour steps
+local function hazardFace(part: BasePart, face: Enum.NormalId)
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "DD_Hazard" ; sg.Face = face
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud ; sg.PixelsPerStud = 24
+	sg.LightInfluence = 1 ; sg.Parent = part
+	local f = Instance.new("Frame")
+	f.Size = UDim2.fromScale(1, 1) ; f.BackgroundColor3 = Color3.new(1, 1, 1) ; f.BorderSizePixel = 0 ; f.BackgroundTransparency = 0.18 ; f.Parent = sg
+	local keys, n = {}, 9
+	local yellow, black = Color3.fromRGB(176, 142, 44), Color3.fromRGB(18, 18, 16)
+	for k = 0, n - 1 do
+		local c = (k % 2 == 0) and yellow or black
+		keys[#keys + 1] = ColorSequenceKeypoint.new(k / n, c)
+		keys[#keys + 1] = ColorSequenceKeypoint.new(math.min((k + 1) / n - 0.0005, 1), c)
+	end
+	keys[#keys] = ColorSequenceKeypoint.new(1, keys[#keys].Value)
+	local g = Instance.new("UIGradient") ; g.Color = ColorSequence.new(keys) ; g.Rotation = 8 ; g.Parent = f
+end
+
+-- painted text on the hull: a sliver of invisible part so it can sit on anything
+local function stencil(folder: Instance, pos: Vector3, inward: Vector3, w: number, h: number, text: string, color: Color3?, font: Enum.Font?, transparency: number?, tilt: number?)
+	local p = ddPart(folder, "DD_Stencil", Vector3.new(w, h, 0.05), pos, HULL.cable, Enum.Material.SmoothPlastic)
+	p.Transparency = 1
+	p.CFrame = CFrame.lookAt(pos, pos + inward)
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "DD_StencilGui" ; sg.Face = Enum.NormalId.Front
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud ; sg.PixelsPerStud = 36
+	sg.LightInfluence = 1 ; sg.Parent = p
+	local tl = Instance.new("TextLabel")
+	tl.BackgroundTransparency = 1 ; tl.Size = UDim2.fromScale(1, 1)
+	tl.Font = font or Enum.Font.Oswald ; tl.TextScaled = true ; tl.Text = text
+	tl.TextColor3 = color or Color3.fromRGB(196, 190, 170) ; tl.TextTransparency = transparency or 0.22
+	tl.Rotation = tilt or 0 ; tl.Parent = sg
+	return p
+end
+
+local function dressDoorFrames(folder: Instance, i: number, cx: number)
+	local slot = hullSlot[i]
+	if slot == nil then return end
+	for _, dir in ipairs({ -1, 1 }) do
+		if (dir == -1 and slot > 0) or (dir == 1 and slot < LAST_SLOT) then
+			local x = cx + dir * (IL / 2 - 0.25)
+			local function fp(name, size, pos)
+				local p = ddPart(folder, name, size, pos, DOOR.frame, Enum.Material.Metal)
+				p.MaterialVariant = "MG-Rust 12"
+				p.CastShadow = true
+				return p
+			end
+			for _, s in ipairs({ -1, 1 }) do
+				fp("DD_DoorJamb", Vector3.new(0.55, DH + 1.1, 1.1), Vector3.new(x, (DH + 1.1) / 2, s * (DW / 2 + 0.55)))
+				local gusset = fp("DD_DoorGusset", Vector3.new(0.5, 0.26, 1.7), Vector3.new(x, DH - 0.5, s * (DW / 2 - 0.5)))
+				gusset.Orientation = Vector3.new(s * 45, 0, 0)
+			end
+			local header = fp("DD_DoorHeader", Vector3.new(0.55, 1.1, DW + 2.2), Vector3.new(x, DH + 0.55, 0))
+			hazardFace(header, (dir > 0) and Enum.NormalId.Left or Enum.NormalId.Right)
+			fp("DD_DoorSill", Vector3.new(1.2, 0.22, DW), Vector3.new(cx + dir * (IL / 2 - 0.1), 0.11, 0))
+		end
+	end
+end
+
+-- ============================================================================
+-- Machinery + instruments (visual batch 3d)
+-- Instrument faces and screens are SurfaceGuis (dozens of dials and LEDs for one
+-- part). LEDs tagged DD_Blink and sonar sweeps are animated by WaterRenderer.
+-- ============================================================================
+local function roundFrame(parent: Instance, size: UDim2, pos: UDim2, color: Color3)
+	local f = Instance.new("Frame")
+	f.AnchorPoint = Vector2.new(0.5, 0.5) ; f.Size = size ; f.Position = pos
+	f.BackgroundColor3 = color ; f.BorderSizePixel = 0
+	local uc = Instance.new("UICorner") ; uc.CornerRadius = UDim.new(1, 0) ; uc.Parent = f
+	local ar = Instance.new("UIAspectRatioConstraint") ; ar.Parent = f
+	f.Parent = parent
+	return f
+end
+
+local function guiLabel(parent: Instance, text: string, x: number, y: number, w: number, h: number, color: Color3, font: Enum.Font?)
+	local tl = Instance.new("TextLabel")
+	tl.BackgroundTransparency = 1 ; tl.Position = UDim2.fromScale(x, y) ; tl.Size = UDim2.fromScale(w, h)
+	tl.Font = font or Enum.Font.Code ; tl.Text = text ; tl.TextColor3 = color ; tl.TextScaled = true
+	tl.TextXAlignment = Enum.TextXAlignment.Left
+	tl.Parent = parent
+	return tl
+end
+
+local function panelFace(part: BasePart, face: Enum.NormalId, cols: number, rows: number, seed: number, title: string?)
+	local rng = Random.new(seed)
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "DD_PanelFace" ; sg.Face = face
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud ; sg.PixelsPerStud = 44
+	sg.LightInfluence = 0.8 ; sg.Brightness = 1 ; sg.Parent = part -- dials need room light; only the LEDs read in the dark
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.fromScale(1, 1) ; bg.BackgroundColor3 = Color3.fromRGB(20, 24, 24) ; bg.BorderSizePixel = 0 ; bg.Parent = sg
+	local top = title and 0.16 or 0.04
+	if title then guiLabel(bg, title, 0.04, 0.02, 0.92, 0.11, Color3.fromRGB(196, 186, 150)) end
+	for r = 1, rows do
+		for c = 1, cols do
+			local px, py = (c - 0.5) / cols, top + (1 - top) * (r - 0.5) / rows
+			local pos = UDim2.fromScale(px, py)
+			local kind = rng:NextInteger(1, 10)
+			if kind <= 4 then
+				local dial = roundFrame(bg, UDim2.fromScale(0.82 / cols, 0.82 * (1 - top) / rows), pos, Color3.fromRGB(116, 112, 98))
+				local st = Instance.new("UIStroke") ; st.Color = Color3.fromRGB(60, 62, 60) ; st.Thickness = 2 ; st.Parent = dial
+				local n = Instance.new("Frame")
+				n.AnchorPoint = Vector2.new(0.5, 1) ; n.Position = UDim2.fromScale(0.5, 0.5) ; n.Size = UDim2.fromScale(0.07, 0.42)
+				n.BackgroundColor3 = Color3.fromRGB(170, 40, 30) ; n.BorderSizePixel = 0 ; n.Rotation = rng:NextInteger(-115, 115) ; n.Parent = dial
+			elseif kind <= 8 then
+				local cols3 = { Color3.fromRGB(60, 225, 110), Color3.fromRGB(255, 176, 52), Color3.fromRGB(230, 56, 44) }
+				local led = roundFrame(bg, UDim2.fromScale(0.3 / cols, 0.3 * (1 - top) / rows), pos, cols3[rng:NextInteger(1, 3)])
+				if rng:NextNumber() < 0.45 then CollectionService:AddTag(led, "DD_Blink") end
+			else
+				local sw = Instance.new("Frame")
+				sw.AnchorPoint = Vector2.new(0.5, 0.5) ; sw.Position = pos ; sw.Size = UDim2.fromScale(0.34 / cols, 0.62 * (1 - top) / rows)
+				sw.BackgroundColor3 = Color3.fromRGB(70, 74, 76) ; sw.BorderSizePixel = 0 ; sw.Parent = bg
+			end
+		end
+	end
+	return sg
+end
+
+-- a wall cabinet with an instrument face looking into the room
+local function wallPanel(folder: Instance, x: number, y: number, side: number, w: number, h: number, seed: number, title: string?)
+	local pos = Vector3.new(x, y, side * (IW / 2 - 0.45))
+	local cab = ddPart(folder, "DD_WallPanel", Vector3.new(w, h, 0.5), pos, HULL.tray, Enum.Material.Metal)
+	cab.CFrame = CFrame.lookAt(pos, pos + Vector3.new(0, 0, -side))
+	panelFace(cab, Enum.NormalId.Front, math.floor(w / 0.8), math.floor(h / 0.8), seed, title)
+	return cab
+end
+
+local SCREEN_INK = Color3.fromRGB(96, 240, 150)
+local function screenGui(part: BasePart, face: Enum.NormalId)
+	part.Material = Enum.Material.SmoothPlastic ; part.Color = Color3.fromRGB(6, 12, 10) ; part.Reflectance = 0
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "DD_ScreenGui" ; sg.Face = face
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud ; sg.PixelsPerStud = 70
+	sg.LightInfluence = 0 ; sg.Brightness = 1.5 ; sg.Parent = part
+	local bg = Instance.new("Frame")
+	bg.Size = UDim2.fromScale(1, 1) ; bg.BackgroundColor3 = Color3.fromRGB(6, 22, 14) ; bg.BorderSizePixel = 0 ; bg.Parent = sg
+	return bg
+end
+
+local function sonarScreen(part: BasePart, face: Enum.NormalId)
+	local bg = screenGui(part, face)
+	local scope = roundFrame(bg, UDim2.fromScale(0.92, 0.92), UDim2.fromScale(0.5, 0.5), Color3.fromRGB(4, 34, 18))
+	for _, s in ipairs({ 0.66, 0.33 }) do
+		local ring = roundFrame(scope, UDim2.fromScale(s, s), UDim2.fromScale(0.5, 0.5), Color3.new(0, 0, 0))
+		ring.BackgroundTransparency = 1
+		local st = Instance.new("UIStroke") ; st.Color = SCREEN_INK ; st.Transparency = 0.55 ; st.Thickness = 1 ; st.Parent = ring
+	end
+	local st = Instance.new("UIStroke") ; st.Color = SCREEN_INK ; st.Transparency = 0.25 ; st.Thickness = 2 ; st.Parent = scope
+	local sweep = Instance.new("Frame")
+	sweep.Name = "DD_Sweep" ; sweep.BackgroundTransparency = 1 ; sweep.Size = UDim2.fromScale(1, 1) ; sweep.Parent = scope
+	for k = 0, 3 do
+		local ln = Instance.new("Frame")
+		ln.AnchorPoint = Vector2.new(0.5, 1) ; ln.Position = UDim2.fromScale(0.5, 0.5) ; ln.Size = UDim2.new(0, 2, 0.48, 0)
+		ln.BackgroundColor3 = SCREEN_INK ; ln.BackgroundTransparency = 0.1 + k * 0.28 ; ln.BorderSizePixel = 0 ; ln.Rotation = -k * 5 ; ln.Parent = sweep
+	end
+	CollectionService:AddTag(sweep, "DD_SonarSweep")
+end
+
+-- text status screen; `lines` is { {text, colorOrNil}, ... }. Returns the labels.
+local function textScreen(part: BasePart, face: Enum.NormalId, lines: { any })
+	local bg = screenGui(part, face)
+	local out = {}
+	local h = 0.86 / #lines
+	for k, l in ipairs(lines) do
+		out[k] = guiLabel(bg, l[1], 0.05, 0.07 + (k - 1) * h, 0.9, h * 0.8, l[2] or SCREEN_INK)
+	end
+	return out
+end
+
+-- dressConsole faces its screen -Z; consoles against the -Z wall need it on +Z
+local function consoleScreen(folder: Instance, model: Instance, partName: string)
+	local p = model:FindFirstChild(partName)
+	local s = folder:FindFirstChild("DD_Screen_" .. partName)
+	if not (p and s and p:IsA("BasePart") and s:IsA("BasePart")) then return nil, Enum.NormalId.Front end
+	if p.Position.Z < -2 then
+		s.Position = p.Position + Vector3.new(0, p.Size.Y * 0.15, p.Size.Z / 2 + 0.08)
+		local led = folder:FindFirstChild("DD_ScreenLED_" .. partName)
+		if led and led:IsA("BasePart") then
+			led.Position = p.Position + Vector3.new(s.Size.X / 2 - 0.3, p.Size.Y * 0.42, p.Size.Z / 2 + 0.12)
+		end
+		return s, Enum.NormalId.Back
+	end
+	return s, Enum.NormalId.Front
+end
+
+local function shelf(folder: Instance, x: number, y: number, side: number, w: number, seed: number)
+	local rng = Random.new(seed)
+	local z = side * (IW / 2 - 0.75)
+	ddPart(folder, "DD_Shelf", Vector3.new(w, 0.14, 1.1), Vector3.new(x, y, z), HULL.tray, Enum.Material.Metal)
+	local px = x - w / 2 + 0.5
+	while px < x + w / 2 - 0.4 do
+		local tin = { Color3.fromRGB(120, 114, 100), Color3.fromRGB(96, 60, 44), Color3.fromRGB(60, 74, 80), Color3.fromRGB(140, 120, 70) }
+		local col = tin[rng:NextInteger(1, 4)]
+		if rng:NextNumber() < 0.65 then
+			local h = rng:NextNumber(0.5, 0.85)
+			ddCyl(folder, "DD_Tin", h, 0.5, Vector3.new(px, y + 0.07 + h / 2, z + rng:NextNumber(-0.2, 0.2)), "Y", col, Enum.Material.Metal)
+		else
+			local h = rng:NextNumber(0.5, 0.95)
+			local b = ddPart(folder, "DD_Crate", Vector3.new(0.75, h, 0.7), Vector3.new(px, y + 0.07 + h / 2, z), col, Enum.Material.Cardboard)
+			b.Orientation = Vector3.new(0, rng:NextInteger(-14, 14), 0)
+		end
+		px += rng:NextNumber(0.75, 1.3)
+	end
+end
+
+local function dressTorpedoRoom(folder: Instance, model: Instance, cx: number)
+	for t = 0, 3 do
+		local tube = model:FindFirstChild("TorpedoTube_" .. t)
+		if tube and tube:IsA("BasePart") then
+			-- the baked tubes stood upright; lay them through the bow wall, mouths to the room
+			local z = -9 + t * 6
+			local y = (z > 5) and 8.6 or 4.6 -- tube 4 clears the escape pod
+			tube.CFrame = CFrame.new(cx - IL / 2 + 2, y, z)
+			tube.Material = Enum.Material.Metal ; tube.MaterialVariant = "MG-Rust 24" ; tube.Color = HULL.frame
+			local mx = cx - IL / 2 + 4
+			ddCyl(folder, "DD_TubeFlange", 0.4, 3.7, Vector3.new(mx, y, z), "X", DD.dark, Enum.Material.Metal)
+			local lid = ddCyl(folder, "DD_TubeLid", 0.22, 3.1, Vector3.new(mx + 0.28, y, z), "X", HULL.pipeSteel, Enum.Material.Metal)
+			lid.MaterialVariant = "MG-Rust 27"
+			ddPart(folder, "DD_TubeLatch", Vector3.new(0.18, 0.34, 2.6), Vector3.new(mx + 0.45, y, z), HULL.bandRed, Enum.Material.Metal)
+			ddCyl(folder, "DD_TubeHub", 0.26, 0.7, Vector3.new(mx + 0.5, y, z), "X", DD.dark, Enum.Material.Metal)
+		end
+	end
+	-- the status lamps sit over the tube mouths now
+	for _, c in ipairs(folder:GetChildren()) do
+		if c.Name == "DD_TubeLamp" and c:IsA("BasePart") then
+			local up = (c.Position.Z > 5) and 10.9 or 6.9
+			c.Position = Vector3.new(cx - IL / 2 + 4.3, up, c.Position.Z)
+			c.Size = Vector3.new(0.14, 0.3, 0.8)
+		end
+	end
+	wallPanel(folder, cx - 12, 6.6, -1, 3.6, 3.2, 11, "TUBE CONTROL")
+	shelf(folder, cx + 18, 7.2, 1, 4.6, 12)
+	-- the pod's porthole: Glass mirrored the sky pale pink in the dark room
+	local podWindow = model:FindFirstChild("PodWindow")
+	if podWindow and podWindow:IsA("BasePart") then
+		podWindow.Material = Enum.Material.SmoothPlastic
+		podWindow.Reflectance = 0.04
+		podWindow.Color = Color3.fromRGB(12, 20, 28)
+	end
+end
+
+local function dressBerthingDetail(folder: Instance, cx: number)
+	for _, ox in ipairs({ -12, 0, 12 }) do
+		shelf(folder, cx + ox, 7.6, 1, 4.6, 20 + ox)
+	end
+	-- a bunk-room clothes rail
+	ddCyl(folder, "DD_ClothesRail", 8, 0.14, Vector3.new(cx - 6, 8.2, -IW / 2 + 1.6), "X", HULL.pipeSteel, Enum.Material.Metal)
+	for k, ox in ipairs({ -9, -7.4, -5.2, -3.4 }) do
+		local coat = ddPart(folder, "DD_Coverall", Vector3.new(1.05, 4.2, 0.34), Vector3.new(cx + ox, 6, -IW / 2 + 1.6), (k % 2 == 0) and Color3.fromRGB(70, 74, 62) or Color3.fromRGB(58, 62, 74), Enum.Material.Fabric)
+		coat.Orientation = Vector3.new(0, (k * 37) % 28 - 14, (k % 2 == 0) and 2.5 or -2)
+	end
+end
+
+local function dressGalleyDetail(folder: Instance, model: Instance, cx: number)
+	local counter = model:FindFirstChild("Counter")
+	if counter and counter:IsA("BasePart") then
+		counter.MaterialVariant = "MG-Rust 27" ; counter.Color = Color3.fromRGB(100, 102, 102)
+	end
+	local z = -IW / 2 + 3
+	ddPart(folder, "DD_Worktop", Vector3.new(IL - 11.6, 0.18, 3.3), Vector3.new(cx, 3.08, z), Color3.fromRGB(126, 130, 132), Enum.Material.Metal)
+	for k = -4, 4 do
+		local front = ddPart(folder, "DD_CabFront", Vector3.new(3.6, 2.3, 0.1), Vector3.new(cx + k * 4, 1.4, z + 1.54), Color3.fromRGB(92, 94, 94), Enum.Material.Metal)
+		front.MaterialVariant = "MG-Rust 27"
+		ddPart(folder, "DD_CabHandle", Vector3.new(1.6, 0.1, 0.1), Vector3.new(cx + k * 4, 2.3, z + 1.65), HULL.pipeSteel, Enum.Material.Metal)
+	end
+	-- range + extractor hood + flue
+	ddPart(folder, "DD_Range", Vector3.new(3.4, 0.14, 2.6), Vector3.new(cx, 3.2, z), DD.dark, Enum.Material.Metal)
+	ddPart(folder, "DD_Hood", Vector3.new(4.4, 0.9, 2.6), Vector3.new(cx, 9.2, -IW / 2 + 1.6), Color3.fromRGB(110, 112, 112), Enum.Material.Metal)
+	ddPart(folder, "DD_Flue", Vector3.new(1.4, 5.4, 1.4), Vector3.new(cx, 12.3, -IW / 2 + 1.4), Color3.fromRGB(96, 98, 98), Enum.Material.Metal)
+	-- sink + tap
+	ddPart(folder, "DD_Sink", Vector3.new(2.6, 0.05, 1.9), Vector3.new(cx - 10, 3.19, z), Color3.fromRGB(44, 46, 48), Enum.Material.Metal)
+	ddCyl(folder, "DD_Tap", 1, 0.16, Vector3.new(cx - 10, 3.65, z - 1.1), "Y", HULL.pipeSteel, Enum.Material.Metal)
+	shelf(folder, cx - 12, 7, -1, 7, 31)
+	shelf(folder, cx + 12, 7, -1, 7, 32)
+end
+
+local function dressOfficersDetail(folder: Instance, model: Instance, cx: number)
+	local desk = model:FindFirstChild("Desk")
+	if desk and desk:IsA("BasePart") then
+		desk.Material = Enum.Material.WoodPlanks ; desk.Color = Color3.fromRGB(78, 54, 36)
+	end
+	-- captain's bookcase (behind the partition)
+	local bx = cx + 2
+	local back = ddPart(folder, "DD_Bookcase", Vector3.new(6, 8, 1.2), Vector3.new(bx, 4.1, -IW / 2 + 0.8), Color3.fromRGB(62, 42, 28), Enum.Material.WoodPlanks)
+	back.CanCollide = true
+	local rng = Random.new(44)
+	for _, sy in ipairs({ 2.4, 4.6, 6.8 }) do
+		ddPart(folder, "DD_BookShelf", Vector3.new(5.8, 0.14, 0.5), Vector3.new(bx, sy, -IW / 2 + 1.6), Color3.fromRGB(70, 48, 32), Enum.Material.WoodPlanks)
+		local px = bx - 2.6
+		while px < bx + 2.5 do
+			local w = rng:NextNumber(0.2, 0.42)
+			local h = rng:NextNumber(1.1, 1.65)
+			local b = ddPart(folder, "DD_Book", Vector3.new(w, h, 0.45), Vector3.new(px, sy + 0.07 + h / 2, -IW / 2 + 1.6), Color3.fromHSV(rng:NextNumber(0, 0.12), rng:NextNumber(0.35, 0.7), rng:NextNumber(0.18, 0.42)), Enum.Material.Fabric)
+			if rng:NextNumber() < 0.12 then b.Orientation = Vector3.new(0, 0, rng:NextInteger(6, 14)) end
+			px += w + 0.04
+		end
+	end
+	ddPart(folder, "DD_Rug", Vector3.new(9, 0.05, 5), Vector3.new(cx - 3, 0.04, -8), Color3.fromRGB(70, 28, 24), Enum.Material.Fabric)
+	wallPanel(folder, cx + 15, 6.4, 1, 2.8, 3.2, 41, "BUS C")
+end
+
+local function dressControlRoom(folder: Instance, model: Instance, cx: number)
+	wallPanel(folder, cx - 12, 7.8, 1, 4.4, 3.8, 51, "DEPTH / TRIM")
+	wallPanel(folder, cx + 12, 7, 1, 4.4, 4.4, 52, "HYDRAULICS")
+	wallPanel(folder, cx - 6, 7, -1, 4.4, 4.4, 53, "BATTERY BUS")
+	wallPanel(folder, cx - 12, 7, -1, 4.4, 4.4, 54, "ATMOSPHERE")
+	-- helm: tilted instrument desk + control yoke
+	local helm = model:FindFirstChild("Helm")
+	if helm and helm:IsA("BasePart") then
+		local d = ddPart(folder, "DD_HelmDesk", Vector3.new(3.8, 0.2, 2.3), helm.Position + Vector3.new(0, 1.85, 0.5), HULL.tray, Enum.Material.Metal)
+		d.Orientation = Vector3.new(24, 0, 0)
+		panelFace(d, Enum.NormalId.Top, 5, 3, 55)
+		ddCyl(folder, "DD_YokeColumn", 1.5, 0.26, helm.Position + Vector3.new(0, 1.2, -2.5), "Y", DD.dark, Enum.Material.Metal)
+		ddPart(folder, "DD_Yoke", Vector3.new(1.9, 0.2, 0.2), helm.Position + Vector3.new(0, 2, -2.5), HULL.pipeSteel, Enum.Material.Metal)
+		for _, s in ipairs({ -1, 1 }) do
+			ddPart(folder, "DD_YokeGrip", Vector3.new(0.24, 0.6, 0.24), helm.Position + Vector3.new(s * 0.95, 2.1, -2.5), Color3.fromRGB(26, 26, 28), Enum.Material.Rubber)
+		end
+	end
+	local nav = model:FindFirstChild("NavConsole")
+	if nav and nav:IsA("BasePart") then
+		local d = ddPart(folder, "DD_NavDesk", Vector3.new(7.6, 0.2, 1.6), nav.Position + Vector3.new(0, 1.85, 0), HULL.tray, Enum.Material.Metal)
+		d.Orientation = Vector3.new(-18, 0, 0)
+		panelFace(d, Enum.NormalId.Top, 9, 2, 56)
+	end
+	local s, face = consoleScreen(folder, model, "Helm")
+	if s then textScreen(s, face, { { "HDG  ---" }, { "TRIM  -14 DEG", Color3.fromRGB(255, 176, 52) }, { "PROPULSION LOST", Color3.fromRGB(240, 70, 56) } }) end
+	s, face = consoleScreen(folder, model, "NavConsole")
+	if s then textScreen(s, face, { { "NAV  NO FIX" }, { "DEPTH  OFF SCALE", Color3.fromRGB(255, 176, 52) } }) end
+	s, face = consoleScreen(folder, model, "BallastPanel")
+	local ballast = model:FindFirstChild("BallastPanel")
+	if s and ballast then
+		local labels = textScreen(s, face, { { "BALLAST CTRL" }, { "" } })
+		local function sync()
+			local on = ballast:GetAttribute("FuseInstalled") == true
+			labels[2].Text = on and "BUS ONLINE" or "FUSE BAY OPEN"
+			labels[2].TextColor3 = on and SCREEN_INK or Color3.fromRGB(240, 70, 56)
+		end
+		ballast:GetAttributeChangedSignal("FuseInstalled"):Connect(sync)
+		sync()
+	end
+end
+
+local function dressSonarDetail(folder: Instance, model: Instance, cx: number)
+	local s, face = consoleScreen(folder, model, "SonarConsole")
+	if s then sonarScreen(s, face) end
+	s, face = consoleScreen(folder, model, "RadioConsole")
+	local radio = model:FindFirstChild("RadioConsole")
+	if s and radio then
+		local labels = textScreen(s, face, { { "HF  2182 kHz" }, { "" } })
+		local function sync()
+			local locked = radio:GetAttribute("Locked") ~= false
+			labels[2].Text = locked and "NO POWER" or "TX READY"
+			labels[2].TextColor3 = locked and Color3.fromRGB(240, 70, 56) or SCREEN_INK
+		end
+		radio:GetAttributeChangedSignal("Locked"):Connect(sync)
+		sync()
+	end
+	-- floor-standing radio rack in the radio half
+	local rack = ddPart(folder, "DD_RadioRack", Vector3.new(3.6, 9, 1.4), Vector3.new(cx + 6, 4.5, -IW / 2 + 1), HULL.tray, Enum.Material.Metal)
+	rack.MaterialVariant = "MG-Rust 29" ; rack.CanCollide = true
+	local rf = Vector3.new(cx + 6, 4.5, -IW / 2 + 1)
+	rack.CFrame = CFrame.lookAt(rf, rf + Vector3.new(0, 0, 1))
+	panelFace(rack, Enum.NormalId.Front, 5, 11, 61, "TRANSMIT")
+	wallPanel(folder, cx - 18, 7, 1, 4.4, 4, 62, "HYDROPHONE ARRAY")
+	wallPanel(folder, cx + 18, 7, -1, 4.4, 4, 63, "RADIO BUS")
+end
+
+local function dressEngineRoom(folder: Instance, model: Instance, cx: number)
+	local gen = model:FindFirstChild("Generator")
+	if not (gen and gen:IsA("BasePart")) then return end
+	local g = gen.Position
+	gen.Material = Enum.Material.Metal ; gen.MaterialVariant = "MG-Rust 06" ; gen.Color = Color3.fromRGB(110, 112, 100)
+	for _, c in ipairs(folder:GetChildren()) do
+		if c:IsA("BasePart") then
+			if c.Name:match("^DD_GTrim") then
+				c.Material = Enum.Material.Metal ; c.MaterialVariant = "MG-Rust 12" ; c.Color = DOOR.frame
+			elseif c.Name == "DD_GStack" or c.Name == "DD_GCeilPipe" or c.Name:match("^DD_GCoolant") then
+				c:Destroy()
+			end
+		end
+	end
+	-- skid, cylinder heads, rocker cover, exhaust manifold + stack to the ceiling
+	ddPart(folder, "DD_GSkid", Vector3.new(9.6, 0.6, 7.4), Vector3.new(g.X, 0.3, g.Z), DD.dark, Enum.Material.Metal)
+	for k = 0, 5 do
+		local hx = g.X - 3 + k * 1.2
+		ddCyl(folder, "DD_GHead", 0.9, 1.05, Vector3.new(hx, 8.42, g.Z + 0.8), "Y", HULL.pipeSteel, Enum.Material.Metal)
+		ddPart(folder, "DD_GPushrod", Vector3.new(0.16, 0.9, 0.7), Vector3.new(hx, 8.42, g.Z - 0.2), DD.dark, Enum.Material.Metal)
+		ddCyl(folder, "DD_GRunner", 1.1, 0.34, Vector3.new(hx, 8.5, g.Z - 0.9), "Z", HULL.pipeRust, Enum.Material.Metal).MaterialVariant = "MG-Rust 14"
+	end
+	ddPart(folder, "DD_GRocker", Vector3.new(7.4, 0.26, 1.5), Vector3.new(g.X, 8.98, g.Z + 0.8), HULL.frame, Enum.Material.Metal)
+	ddCyl(folder, "DD_GManifold", 7.8, 0.72, Vector3.new(g.X, 8.5, g.Z - 1.5), "X", HULL.pipeRust, Enum.Material.Metal).MaterialVariant = "MG-Rust 14"
+	ddCyl(folder, "DD_GStackPipe", 7, 1.1, Vector3.new(g.X + 3.4, 12, g.Z - 1.5), "Y", HULL.pipeRust, Enum.Material.Metal).MaterialVariant = "MG-Rust 14"
+	ddCyl(folder, "DD_GStackBand", 0.3, 1.3, Vector3.new(g.X + 3.4, 11.4, g.Z - 1.5), "Y", DD.dark, Enum.Material.Metal)
+	-- access doors either side of the control panel
+	for _, s in ipairs({ -1, 1 }) do
+		ddPart(folder, "DD_GDoor", Vector3.new(1.6, 5, 0.1), Vector3.new(g.X + s * 3.1, 3.5, g.Z - 3.05), HULL.frame, Enum.Material.Metal).MaterialVariant = "MG-Rust 06"
+		ddPart(folder, "DD_GLatch", Vector3.new(0.14, 0.7, 0.16), Vector3.new(g.X + s * 2.5, 3.6, g.Z - 3.14), HULL.pipeSteel, Enum.Material.Metal)
+	end
+	-- flywheel: an anchored root with welded spokes (WaterRenderer spins it on Running)
+	local fly = ddCyl(folder, "DD_GFlywheel", 0.7, 5.4, Vector3.new(g.X - 4.65, 3.2, g.Z), "X", HULL.frame, Enum.Material.Metal)
+	fly.Orientation = Vector3.new(0, 0, 0)
+	for k = 0, 3 do
+		local a = math.rad(k * 90)
+		leafPart(fly, "DD_GFlySpoke", Vector3.new(0.14, 0.7, 0.34), CFrame.new(-0.38, math.cos(a) * 1.9, math.sin(a) * 1.9), DD.dark)
+	end
+	leafPart(fly, "DD_GFlyHub", Vector3.new(0.3, 1.1, 1.1), CFrame.new(-0.42, 0, 0), HULL.pipeSteel, Enum.Material.Metal, Enum.PartType.Cylinder)
+	ddPart(folder, "DD_GGuard", Vector3.new(1.3, 0.16, 5.9), Vector3.new(g.X - 4.65, 6.2, g.Z), DOOR.frame, Enum.Material.Metal).MaterialVariant = "MG-Rust 12"
+	-- control panel status follows the generator
+	local panel = folder:FindFirstChild("DD_GPanel")
+	local status
+	if panel then
+		for _, d in ipairs(panel:GetDescendants()) do
+			if d:IsA("TextLabel") and d.Text:find("OFFLINE") then status = d end
+		end
+	end
+	if status then
+		local function sync()
+			local on = gen:GetAttribute("Running") == true
+			status.Text = on and "ONLINE - BUS LIVE" or "OFFLINE - STANDBY"
+			status.TextColor3 = on and Color3.fromRGB(96, 240, 150) or Color3.fromRGB(200, 120, 40)
+		end
+		gen:GetAttributeChangedSignal("Running"):Connect(sync)
+		sync()
+	end
+	-- walkway deck + hazard edge
+	local walk = model:FindFirstChild("Walkway")
+	if walk and walk:IsA("BasePart") then
+		walk.Material = Enum.Material.DiamondPlate ; walk.MaterialVariant = "deepdescent_floor_grate" ; walk.Color = Color3.fromRGB(72, 74, 76)
+		ddPart(folder, "DD_WalkEdge", Vector3.new(walk.Size.X, 0.05, 0.22), walk.Position + Vector3.new(0, 0.22, 2.02), DOOR.frame, Enum.Material.SmoothPlastic)
+	end
+	-- plant on the +Z side: pressure tank on cradles, and a pump + motor set
+	local tx = cx + 14
+	local tank = ddCyl(folder, "DD_Tank", 8, 3.6, Vector3.new(tx, 2.9, 8.6), "X", HULL.pipeNavy, Enum.Material.Metal)
+	tank.MaterialVariant = "MG-Rust 28" ; tank.CanCollide = true ; tank.CastShadow = true
+	for _, ox in ipairs({ -2.6, 2.6 }) do
+		ddPart(folder, "DD_TankCradle", Vector3.new(0.5, 1.4, 3.6), Vector3.new(tx + ox, 0.7, 8.6), DD.dark, Enum.Material.Metal)
+		ddCyl(folder, "DD_TankStrap", 0.26, 3.72, Vector3.new(tx + ox, 2.9, 8.6), "X", DD.dark, Enum.Material.Metal)
+	end
+	ddCyl(folder, "DD_TankPipe", 9.2, 0.5, Vector3.new(tx - 1.2, 9.2, 8.6), "Y", HULL.pipeSteel, Enum.Material.Metal)
+	local mx = cx - 14
+	ddPart(folder, "DD_PumpSkid", Vector3.new(7, 0.5, 3.2), Vector3.new(mx, 0.25, 8.6), DD.dark, Enum.Material.Metal)
+	local motor = ddCyl(folder, "DD_Motor", 3.4, 2.4, Vector3.new(mx - 1.4, 1.75, 8.6), "X", HULL.frame, Enum.Material.Metal)
+	motor.MaterialVariant = "MG-Rust 06" ; motor.CanCollide = true ; motor.CastShadow = true
+	for k = 0, 3 do
+		ddCyl(folder, "DD_MotorFin", 0.12, 2.6, Vector3.new(mx - 2.6 + k * 0.8, 1.75, 8.6), "X", DD.dark, Enum.Material.Metal)
+	end
+	local pump = ddPart(folder, "DD_Pump", Vector3.new(2, 2, 2), Vector3.new(mx + 1.6, 1.5, 8.6), HULL.bandRed, Enum.Material.Metal, Enum.PartType.Ball)
+	pump.MaterialVariant = "MG-Rust 13" ; pump.CanCollide = true
+	ddCyl(folder, "DD_PumpRiser", 11.8, 0.6, Vector3.new(mx + 1.6, 8, 8.6), "Y", HULL.pipeRust, Enum.Material.Metal).MaterialVariant = "MG-Rust 14"
+	wallPanel(folder, cx - 18, 7, 1, 4.4, 4.2, 81, "AUX BUS")
+	wallPanel(folder, cx + 12, 7, -1, 4.4, 4.2, 82, "ENGINE ORDER")
+end
+
+local function dressAftDetail(folder: Instance, cx: number)
+	-- torpedo hoist: an overhead rail, trolley and chain
+	local rz, ry = -IW / 2 + 3, 12.9
+	ddPart(folder, "DD_HoistRail", Vector3.new(IL - 2, 0.5, 0.34), Vector3.new(cx, ry, rz), DD.dark, Enum.Material.Metal).CastShadow = true
+	for _, ox in ipairs({ -15, -3, 9, 21 }) do
+		ddPart(folder, "DD_HoistHanger", Vector3.new(0.2, 2.2, 0.2), Vector3.new(cx + ox + 0.5, ry + 1.3, rz), DD.dark, Enum.Material.Metal)
+	end
+	local tx = cx + 7
+	local trolley = ddPart(folder, "DD_HoistTrolley", Vector3.new(1.3, 0.5, 0.9), Vector3.new(tx, ry - 0.4, rz), DOOR.frame, Enum.Material.Metal)
+	trolley.MaterialVariant = "MG-Rust 12"
+	local hook = ddPart(folder, "DD_HoistHook", Vector3.new(0.5, 0.5, 0.2), Vector3.new(tx, 6.5, rz), DD.dark, Enum.Material.Metal)
+	local a0 = Instance.new("Attachment") ; a0.Name = "DD_ChainA" ; a0.Parent = trolley
+	local a1 = Instance.new("Attachment") ; a1.Name = "DD_ChainB" ; a1.Parent = hook
+	local chain = Instance.new("Beam")
+	chain.Name = "DD_Chain" ; chain.Attachment0 = a0 ; chain.Attachment1 = a1 ; chain.Width0 = 0.14 ; chain.Width1 = 0.14
+	chain.FaceCamera = true ; chain.LightInfluence = 1 ; chain.Color = ColorSequence.new(Color3.fromRGB(36, 36, 38)) ; chain.Transparency = NumberSequence.new(0)
+	chain.Parent = trolley
+	wallPanel(folder, cx - 12, 11, -1, 3.8, 3, 91, "TUBE AFT")
+end
+
+-- ============================================================================
+-- Grime + signage (visual batch 2b): no textures, just gradients and paint.
+-- Each side wall gets one low-res SurfaceGui with a dark waterline band, a pale salt
+-- line at the old high-water mark and rust streaks running down from the pipes.
+-- ============================================================================
+local function gradientDown(f: Frame, topT: number, bottomT: number)
+	local g = Instance.new("UIGradient")
+	g.Rotation = 90
+	g.Transparency = NumberSequence.new(topT, bottomT)
+	g.Parent = f
+end
+
+local function wallGrime(wall: Instance?, face: Enum.NormalId, seed: number, startLevel: number)
+	if not (wall and wall:IsA("BasePart")) then return end
+	local rng = Random.new(seed)
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "DD_Grime" ; sg.Face = face
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud ; sg.PixelsPerStud = 14
+	sg.LightInfluence = 1 ; sg.Parent = wall
+	local tideH = math.clamp(startLevel / 100 + 0.22, 0.24, 0.72)
+	local tide = Instance.new("Frame")
+	tide.Position = UDim2.fromScale(0, 1 - tideH) ; tide.Size = UDim2.fromScale(1, tideH)
+	tide.BackgroundColor3 = Color3.fromRGB(10, 10, 8) ; tide.BorderSizePixel = 0 ; tide.Parent = sg
+	gradientDown(tide, 1, 0.12)
+	local salt = Instance.new("Frame")
+	salt.Position = UDim2.fromScale(0, 1 - tideH * 0.72) ; salt.Size = UDim2.fromScale(1, 0.012)
+	salt.BackgroundColor3 = Color3.fromRGB(150, 150, 132) ; salt.BackgroundTransparency = 0.72 ; salt.BorderSizePixel = 0 ; salt.Parent = sg
+	for _ = 1, 16 do
+		local s = Instance.new("Frame")
+		local rust = rng:NextNumber() < 0.7
+		s.Position = UDim2.fromScale(rng:NextNumber(0, 0.99), rng:NextNumber(0.06, 0.3))
+		s.Size = UDim2.fromScale(rng:NextNumber(0.004, 0.02), rng:NextNumber(0.18, 0.6))
+		s.BackgroundColor3 = rust and Color3.fromRGB(70, 36, 18) or Color3.fromRGB(12, 11, 10)
+		s.BorderSizePixel = 0 ; s.Parent = sg
+		gradientDown(s, 0.22, 1)
+	end
+end
+
+local ROOM_SIGN = {
+	[1] = "FWD TORPEDO ROOM", [2] = "CREW BERTHING", [3] = "GALLEY + MESS", [4] = "OFFICERS",
+	[5] = "CONTROL ROOM", [6] = "SONAR + RADIO", [8] = "ENGINE ROOM", [9] = "AFT TORPEDO ROOM",
+}
+local WARNING = {
+	[1] = "LIVE WARHEADS", [2] = "NO LOOSE GEAR", [3] = "SECURE FOR DIVE", [4] = "AUTHORIZED ONLY",
+	[5] = "SILENCE ON THE BOAT", [6] = "EARPHONES ONLY", [8] = "HEARING PROTECTION", [9] = "LIVE WARHEADS",
+}
+-- scratched into the paint by someone who had time to think about it
+local SCRAWL = {
+	[2] = { x = 2, side = -1, y = 6.6, w = 7, text = "DON'T RUN", tilt = -4 },
+	[6] = { x = -8, side = -1, y = 6.2, w = 7.5, text = "IT'S LISTENING", tilt = 3 },
+	[8] = { x = 15, side = -1, y = 5.4, w = 9, text = "IT COMES WHEN THE LIGHTS DO", tilt = -3 },
+}
+
+local function dressGrime(folder: Instance, model: Instance, i: number, cx: number)
+	local data = SectionData.Sections[i]
+	local lvl = (data and data.startLevel) or 10
+	wallGrime(model:FindFirstChild("WallZpos"), Enum.NormalId.Front, 100 + i, lvl)
+	wallGrime(model:FindFirstChild("WallZneg"), Enum.NormalId.Back, 200 + i, lvl)
+	-- compartment name over each doorway, facing into the room
+	local slot = hullSlot[i]
+	for _, dir in ipairs({ -1, 1 }) do
+		if (dir == -1 and slot > 0) or (dir == 1 and slot < LAST_SLOT) then
+			stencil(folder, Vector3.new(cx + dir * (IL / 2 - 0.04), 13.2, 0), Vector3.new(-dir, 0, 0), 10, 1.15, ROOM_SIGN[i] or "")
+		end
+	end
+	-- side-wall stencils: frame number + standing order
+	stencil(folder, Vector3.new(cx - 12, 10.4, IW / 2 - 0.04), Vector3.new(0, 0, -1), 4, 0.8, WARNING[i] or "", Color3.fromRGB(190, 150, 70), nil, 0.4)
+	for _, ox in ipairs({ -18, 0, 18 }) do
+		stencil(folder, Vector3.new(cx + ox, 2.6, -IW / 2 + 0.04), Vector3.new(0, 0, 1), 1.5, 0.55, ("FR %d"):format(10 + (slot or 0) * 18 + math.floor((ox + 18) / 2)))
+	end
+	local s = SCRAWL[i]
+	if s then
+		stencil(folder, Vector3.new(cx + s.x, s.y, s.side * (IW / 2 - 0.04)), Vector3.new(0, 0, -s.side), s.w, 1.6, s.text, Color3.fromRGB(140, 44, 30), Enum.Font.PermanentMarker, 0.12, s.tilt)
+	end
+	if i == 1 then
+		for t = 0, 3 do
+			local z = -9 + t * 6
+			local y = (z > 5) and 8.6 or 4.6
+			stencil(folder, Vector3.new(cx - IL / 2 + 4.45, y + 1.05, z), Vector3.new(1, 0, 0), 0.8, 0.8, tostring(t + 1))
+		end
+	end
+end
+
+-- ============================================================================
+-- Atmosphere effects (visual batch 4b): drips, steam leaks, a dangling cable that
+-- sparks, and light shafts at the breach. Everything sits on tiny invisible parts.
+-- WaterRenderer adds a ripple where each DD_Drip lands; PolishManager fires sparks.
+-- ============================================================================
+local SMOKE_TEX = "rbxasset://textures/particles/smoke_main.dds"
+
+local function fxPoint(folder: Instance, name: string, pos: Vector3)
+	local p = ddPart(folder, name, Vector3.new(0.1, 0.1, 0.1), pos, HULL.cable, Enum.Material.SmoothPlastic)
+	p.Transparency = 1
+	return p
+end
+
+local function addDrip(folder: Instance, i: number, x: number, y: number, z: number, rate: number)
+	local p = fxPoint(folder, "DD_Drip", Vector3.new(x, y, z))
+	p:SetAttribute("Section", i)
+	p:SetAttribute("Rate", rate)
+	CollectionService:AddTag(p, "DD_Drip")
+	local e = Instance.new("ParticleEmitter")
+	e.Name = "DD_DripFX" ; e.Texture = SMOKE_TEX ; e.Rate = rate
+	e.EmissionDirection = Enum.NormalId.Bottom ; e.Speed = NumberRange.new(0.2) ; e.SpreadAngle = Vector2.new(0, 0)
+	e.Acceleration = Vector3.new(0, -48, 0) ; e.Lifetime = NumberRange.new(0.8)
+	e.Size = NumberSequence.new(0.09) ; e.Squash = NumberSequence.new(1.4)
+	e.Transparency = NumberSequence.new(0.1) ; e.LightInfluence = 0.75 ; e.Brightness = 3
+	e.Color = ColorSequence.new(Color3.fromRGB(200, 214, 220)) ; e.Parent = p
+end
+
+local function addSteam(folder: Instance, pos: Vector3, dir: Vector3, rate: number)
+	local p = fxPoint(folder, "DD_SteamLeak", pos)
+	p.CFrame = CFrame.lookAt(pos, pos + dir)
+	local e = Instance.new("ParticleEmitter")
+	e.Name = "DD_SteamFX" ; e.Texture = SMOKE_TEX ; e.Rate = rate
+	e.EmissionDirection = Enum.NormalId.Front ; e.Speed = NumberRange.new(1.6, 3) ; e.SpreadAngle = Vector2.new(14, 14)
+	e.Acceleration = Vector3.new(0, 1.2, 0) ; e.Drag = 1.2 ; e.Lifetime = NumberRange.new(2, 3.6)
+	e.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.25), NumberSequenceKeypoint.new(1, 3) })
+	e.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.72), NumberSequenceKeypoint.new(1, 1) })
+	e.LightInfluence = 1 ; e.Brightness = 1.4 ; e.RotSpeed = NumberRange.new(-30, 30) ; e.Rotation = NumberRange.new(0, 360)
+	e.Color = ColorSequence.new(Color3.fromRGB(205, 208, 212)) ; e.Parent = p
+end
+
+-- a cable hanging out of the tray; its cut end is what sparks (PolishManager)
+local function addSparker(folder: Instance, x: number, y: number)
+	local z = -8.3
+	local p = fxPoint(folder, "DD_CableEnd", Vector3.new(x, y, z))
+	CollectionService:AddTag(p, "DD_Sparker")
+	local a0 = Instance.new("Attachment") ; a0.Name = "DD_TopA" ; a0.Parent = p ; a0.WorldPosition = Vector3.new(x + 0.9, 14.95, z)
+	local a1 = Instance.new("Attachment") ; a1.Name = "DD_EndA" ; a1.Parent = p
+	a0.Axis = Vector3.new(0, -1, 0) ; a0.SecondaryAxis = Vector3.new(1, 0, 0)
+	a1.Axis = Vector3.new(1, 0.4, 0) ; a1.SecondaryAxis = Vector3.new(0, 1, 0)
+	local beam = Instance.new("Beam")
+	beam.Name = "DD_LooseCable" ; beam.Attachment0 = a0 ; beam.Attachment1 = a1
+	beam.Color = ColorSequence.new(HULL.cable) ; beam.Width0 = 0.13 ; beam.Width1 = 0.1 ; beam.FaceCamera = true
+	beam.Segments = 10 ; beam.LightInfluence = 1 ; beam.Transparency = NumberSequence.new(0)
+	beam.CurveSize0 = 2 ; beam.CurveSize1 = 1
+	beam.Parent = p
+end
+
+local function dressEffects(folder: Instance, i: number, cx: number)
+	local shift = (i % 3) * 2
+	addDrip(folder, i, cx - 18 + shift, 14, 9.2, 0.55)
+	addDrip(folder, i, cx + 6 + shift, 14, 9.2, 0.9)
+	addDrip(folder, i, cx - 7, 14.7, -8.1, 0.35)
+	addSteam(folder, Vector3.new(cx - 6 + shift, 14.3, 8.8), Vector3.new(0.2, -0.4, -1).Unit, (i == 8) and 7 or 3)
+	if i == 3 then addSteam(folder, Vector3.new(cx, 11.4, -9.2), Vector3.new(0.1, -1, 0.3).Unit, 3) end
+	if i == 8 then addSteam(folder, Vector3.new(cx + 18, 14.1, -10.2), Vector3.new(-0.5, -0.5, 0.7).Unit, 5) end
+	if i == 2 then addSparker(folder, cx + 12, 8.6)
+	elseif i == 3 then addSparker(folder, cx - 16, 9.2)
+	elseif i == 6 then addSparker(folder, cx + 15, 8.2)
+	elseif i == 9 then addSparker(folder, cx - 5, 9.4)
+	end
+	if i == 9 then
+		-- cold light falling in through the breach
+		local la = folder:FindFirstChild("DD_BreachLightAnchor")
+		if la then
+			for k = -1, 1 do
+				local a0 = Instance.new("Attachment") ; a0.Name = "DD_ShaftA" ; a0.Parent = la
+				a0.WorldPosition = Vector3.new(cx + IL / 2 - 0.6, 7.5 + k * 1.4, 5 + k * 3.4)
+				local a1 = Instance.new("Attachment") ; a1.Name = "DD_ShaftB" ; a1.Parent = la
+				a1.WorldPosition = Vector3.new(cx + IL / 2 - 20, 2 + k * 1.4, 3 + k * 6)
+				local b = Instance.new("Beam")
+				b.Name = "DD_BreachShaft" ; b.Attachment0 = a0 ; b.Attachment1 = a1
+				b.Width0 = 3 ; b.Width1 = 8 ; b.FaceCamera = true ; b.Segments = 1 ; b.LightEmission = 1 ; b.LightInfluence = 0
+				b.Color = ColorSequence.new(Color3.fromRGB(70, 170, 190))
+				b.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.84), NumberSequenceKeypoint.new(0.6, 0.95), NumberSequenceKeypoint.new(1, 1) })
+				b.Parent = la
+			end
+		end
+	end
+end
+
+-- ============================================================================
+-- Conning tower (visual batch 6): frames + two viewports. There is nothing outside the
+-- hull to look at, so a viewport is a painted view: a round SurfaceGui of black water
+-- and marine snow in a bolted rim. On its Sighting attribute (PolishManager) the
+-- DD_SightLight dots drift across it; WaterRenderer runs that on the client.
+-- ============================================================================
+local function towerWindow(folder: Instance, x: number, y: number, z: number, inwardX: number)
+	local pos = Vector3.new(x, y, z)
+	local base = CFrame.lookAt(pos, pos + Vector3.new(inwardX, 0, 0))
+	local R = 1.9
+	for k = 0, 7 do
+		local a = math.rad(k * 45)
+		local seg = ddPart(folder, "DD_PortRim", Vector3.new(1.62, 0.36, 0.42), pos, HULL.frame, Enum.Material.Metal)
+		seg.CFrame = base * CFrame.new(math.cos(a) * R, math.sin(a) * R, 0) * CFrame.Angles(0, 0, a + math.rad(90))
+		seg.MaterialVariant = "MG-Rust 24"
+	end
+	local view = ddPart(folder, "DD_PortView", Vector3.new(3.5, 3.5, 0.05), pos, HULL.cable, Enum.Material.SmoothPlastic)
+	view.Transparency = 1
+	view.CFrame = base * CFrame.new(0, 0, -0.04)
+	CollectionService:AddTag(view, "DD_TowerWindow")
+	local sg = Instance.new("SurfaceGui")
+	sg.Name = "DD_PortGui" ; sg.Face = Enum.NormalId.Front
+	sg.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud ; sg.PixelsPerStud = 50
+	sg.LightInfluence = 0 ; sg.Brightness = 2 ; sg.Parent = view
+	local water = roundFrame(sg, UDim2.fromScale(1, 1), UDim2.fromScale(0.5, 0.5), Color3.new(1, 1, 1)) -- the gradient multiplies this
+	water.Name = "Water"
+	local g = Instance.new("UIGradient") ; g.Rotation = 90
+	g.Color = ColorSequence.new(Color3.fromRGB(18, 54, 76), Color3.fromRGB(1, 4, 8)) ; g.Parent = water
+	local rng = Random.new(math.floor(z * 10) + 7)
+	for _ = 1, 16 do
+		local r, ang = rng:NextNumber(0, 0.42), rng:NextNumber(0, math.pi * 2)
+		local s = rng:NextNumber(0.006, 0.016)
+		local snow = roundFrame(water, UDim2.fromScale(s, s), UDim2.fromScale(0.5 + math.cos(ang) * r, 0.5 + math.sin(ang) * r), Color3.fromRGB(170, 200, 210))
+		snow.BackgroundTransparency = rng:NextNumber(0.45, 0.85)
+	end
+	for k = 1, 5 do
+		local l = roundFrame(water, UDim2.fromScale(0.02 + (k % 2) * 0.014, 0.02 + (k % 2) * 0.014), UDim2.fromScale(0.5, 0.5), Color3.fromRGB(150, 235, 215))
+		l.Name = "DD_SightLight" ; l.BackgroundTransparency = 1 ; l.ZIndex = 3 ; l:SetAttribute("Index", k)
+	end
+	-- something huge eclipsing the deep's glow: a soft black band, clipped by the round glass
+	local mass = roundFrame(water, UDim2.fromScale(1, 1), UDim2.fromScale(0.5, 0.5), Color3.new(0, 0, 0))
+	mass.Name = "DD_SightMass" ; mass.ZIndex = 2
+	local band = Instance.new("UIGradient")
+	band.Name = "Band" ; band.Offset = Vector2.new(-1, 0)
+	band.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.28, 1), NumberSequenceKeypoint.new(0.44, 0.04),
+		NumberSequenceKeypoint.new(0.56, 0.04), NumberSequenceKeypoint.new(0.72, 1), NumberSequenceKeypoint.new(1, 1),
+	})
+	band.Parent = mass
+end
+
+local function dressTower(folder: Instance, cx: number)
+	local baseY, topY = 19, 33
+	local cy = (baseY + topY) / 2
+	for _, sx in ipairs({ -1, 1 }) do
+		for _, sz in ipairs({ -1, 1 }) do
+			local post = ddPart(folder, "DD_TowerPost", Vector3.new(0.7, topY - baseY, 0.7), Vector3.new(cx + sx * 3.65, cy, sz * 3.65), HULL.frame, Enum.Material.Metal)
+			post.MaterialVariant = "MG-Rust 24" ; post.CastShadow = true
+		end
+	end
+	for _, y in ipairs({ 21, 27.6, 32.4 }) do
+		for _, s in ipairs({ -1, 1 }) do
+			ddPart(folder, "DD_TowerRing", Vector3.new(8, 0.5, 0.3), Vector3.new(cx, y, s * 3.86), HULL.frame, Enum.Material.Metal).MaterialVariant = "MG-Rust 24"
+			ddPart(folder, "DD_TowerRing", Vector3.new(0.3, 0.5, 8), Vector3.new(cx + s * 3.86, y, 0), HULL.frame, Enum.Material.Metal).MaterialVariant = "MG-Rust 24"
+		end
+	end
+	towerWindow(folder, cx - 3.82, 24.2, 0.4, 1)
+	towerWindow(folder, cx + 3.82, 24.2, 1, -1)
+	stencil(folder, Vector3.new(cx, 29.8, 3.96), Vector3.new(0, 0, -1), 4.4, 0.7, "CONNING TOWER")
+end
+
+local function dressMachinery(folder: Instance, model: Instance, i: number, cx: number)
+	if i == 7 then dressTower(folder, cx) ; return end
+	dressDoorFrames(folder, i, cx)
+	dressGrime(folder, model, i, cx)
+	dressEffects(folder, i, cx)
+	if i == 1 then dressTorpedoRoom(folder, model, cx)
+	elseif i == 2 then dressBerthingDetail(folder, cx)
+	elseif i == 3 then dressGalleyDetail(folder, model, cx)
+	elseif i == 4 then dressOfficersDetail(folder, model, cx)
+	elseif i == 5 then dressControlRoom(folder, model, cx)
+	elseif i == 6 then dressSonarDetail(folder, model, cx)
+	elseif i == 8 then dressEngineRoom(folder, model, cx)
+	elseif i == 9 then dressAftDetail(folder, cx)
+	end
+end
+
 -- Entry point for the dressing pass (idempotent; safe to call standalone or after Build).
 function MapBuilder.Dress()
 	if not root then root = Workspace:FindFirstChild("Submarine") end
@@ -1278,7 +2562,7 @@ function MapBuilder.Dress()
 			if i == 7 then
 				dressPeriscope(folder, model)
 			else
-				dressIndustrial(folder, cx)
+				dressIndustrial(folder, cx, i)
 				if i == 2 then dressBerthing(folder, model, cx)
 				elseif i == 3 then dressGalley(folder, model, cx) ; dressNotice(folder, model, cx)
 				elseif i == 4 then dressOfficers(folder, model, cx)
@@ -1288,9 +2572,15 @@ function MapBuilder.Dress()
 				elseif i == 9 then dressBreach(folder, model, cx) ; dressAft(folder, model, cx)
 				end
 			end
+			dressSurfaces(model, i)
+			dressEmergencyLighting(folder, model, i, cx)  -- after the room dressing (uses its screens/panels)
+			dressMainLamps(folder, model, i, cx)
+			dressMachinery(folder, model, i, cx)
 			n += 1
 		end
 	end
+	dressConnectorSurfaces()
+	dressBulkheadDoors()
 	dressLockers()
 	dressSafe()
 	dressExterior()
